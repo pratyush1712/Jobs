@@ -1,0 +1,26 @@
+# Secrets — never commit these
+extraction/.env
+extraction/secrets/
+
+# Playwright browser profile (large, machine-specific)
+extraction/runtime/
+
+# Debug artifacts (screenshots, HTML captures)
+extraction/artifacts/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
