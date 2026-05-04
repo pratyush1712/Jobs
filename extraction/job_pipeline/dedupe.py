@@ -1,6 +1,9 @@
 from __future__ import annotations
+
 from typing import Any
+
 from .utils import make_dedupe_key, normalize_url_for_dedupe
+
 
 class DedupeIndex:
     """Tracks seen jobs by URL and dedupe key.
@@ -17,7 +20,10 @@ class DedupeIndex:
     def add(self, record: dict[str, Any]) -> bool:
         url_key = normalize_url_for_dedupe(str(record.get("job_url") or ""))
         dedupe_key = str(record.get("dedupe_key") or "") or make_dedupe_key(
-            str(record.get("job_url") or ""), str(record.get("company") or ""), str(record.get("job_title") or ""), record.get("locations") or []
+            str(record.get("job_url") or ""),
+            str(record.get("company") or ""),
+            str(record.get("job_title") or ""),
+            record.get("locations") or [],
         )
         record["dedupe_key"] = dedupe_key
         url_check = url_key if url_key else ""

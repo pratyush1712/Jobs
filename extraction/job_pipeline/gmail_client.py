@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 from typing import Any
 
-from .constants import DEFAULT_GMAIL_CREDENTIALS_FILE, DEFAULT_GMAIL_TOKEN_FILE, EXTRACTION_DIR, GMAIL_SCOPES
+from .constants import (
+    DEFAULT_GMAIL_CREDENTIALS_FILE,
+    DEFAULT_GMAIL_TOKEN_FILE,
+    EXTRACTION_DIR,
+    GMAIL_SCOPES,
+)
 from .utils import build_gmail_link, decode_base64url
-
 
 
 def _resolve_project_relative_path(path: str) -> str:
@@ -17,6 +21,7 @@ def _resolve_project_relative_path(path: str) -> str:
     if candidate.is_absolute():
         return str(candidate)
     return str(EXTRACTION_DIR / candidate)
+
 
 def _google_imports() -> tuple[Any, Any, Any, Any]:
     """Import Google packages lazily so non-Gmail tests can run without them."""
@@ -33,9 +38,14 @@ def _google_imports() -> tuple[Any, Any, Any, Any]:
     return Request, Credentials, InstalledAppFlow, build
 
 
-def get_gmail_service(credentials_file: str | None = None, token_file: str = DEFAULT_GMAIL_TOKEN_FILE) -> Any:
+def get_gmail_service(
+    credentials_file: str | None = None, token_file: str = DEFAULT_GMAIL_TOKEN_FILE
+) -> Any:
     Request, Credentials, InstalledAppFlow, build = _google_imports()
-    credentials_file = _resolve_project_relative_path(credentials_file or os.getenv("GMAIL_CREDENTIALS_FILE", DEFAULT_GMAIL_CREDENTIALS_FILE))
+    credentials_file = _resolve_project_relative_path(
+        credentials_file
+        or os.getenv("GMAIL_CREDENTIALS_FILE", DEFAULT_GMAIL_CREDENTIALS_FILE)
+    )
     token_file = _resolve_project_relative_path(token_file)
     creds = None
     Path(token_file).parent.mkdir(parents=True, exist_ok=True)
@@ -46,7 +56,9 @@ def get_gmail_service(credentials_file: str | None = None, token_file: str = DEF
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(credentials_file, GMAIL_SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(
+                credentials_file, GMAIL_SCOPES
+            )
             creds = flow.run_local_server(port=0)
         with open(token_file, "w", encoding="utf-8") as f:
             f.write(creds.to_json())
@@ -54,7 +66,9 @@ def get_gmail_service(credentials_file: str | None = None, token_file: str = DEF
     return build("gmail", "v1", credentials=creds)
 
 
-def list_all_message_ids(service: Any, query: str, limit: int | None = None) -> list[str]:
+def list_all_message_ids(
+    service: Any, query: str, limit: int | None = None
+) -> list[str]:
     ids: list[str] = []
     page_token = None
     while True:
@@ -99,7 +113,12 @@ def extract_payload_bodies(payload: dict[str, Any]) -> dict[str, list[str]]:
 
 
 def read_message(service: Any, gmail_message_id: str) -> dict[str, Any]:
-    msg = service.users().messages().get(userId="me", id=gmail_message_id, format="full").execute()
+    msg = (
+        service.users()
+        .messages()
+        .get(userId="me", id=gmail_message_id, format="full")
+        .execute()
+    )
     payload = msg.get("payload", {}) or {}
     headers = payload.get("headers", []) or []
     date_header = get_header(headers, "Date")

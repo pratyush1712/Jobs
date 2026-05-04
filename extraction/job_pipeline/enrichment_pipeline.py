@@ -12,6 +12,7 @@ fetchers are already pulling the next batch of pages. Neither pool blocks the ot
   (N targets)      │  N_FETCH=8   │                         │  N_ENRICH=4   │
                    └──────────────┘                         └───────────────┘
 """
+
 from __future__ import annotations
 
 import json
@@ -20,12 +21,39 @@ import queue
 import sys
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError, as_completed
+from concurrent.futures import (
+    Future,
+    ThreadPoolExecutor,
+    as_completed,
+)
+from concurrent.futures import (
+    TimeoutError as FutureTimeoutError,
+)
 from pathlib import Path
 from typing import Any
 
-from .colors import bold, bright_green, bright_red, bright_white, counter, cyan, dim, err, eta, header, label, ok, sep, tag, warn, yellow
-from .enrichment_worker import EnrichConfig, EnrichWorker, _DEFAULT_CFG, _attach_error, azure_configured
+from .colors import (
+    bold,
+    bright_white,
+    counter,
+    dim,
+    err,
+    eta,
+    header,
+    label,
+    ok,
+    sep,
+    tag,
+    warn,
+)
+from .enrichment_worker import (
+    _DEFAULT_CFG,
+    EnrichConfig,
+    EnrichWorker,
+    _attach_error,
+    azure_configured,
+    is_enrichment_failed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +62,7 @@ _SENTINEL = object()  # poison-pill to shut down enrich workers
 # ---------------------------------------------------------------------------
 # Progress tracker — thread-safe live output
 # ---------------------------------------------------------------------------
+
 
 class _ProgressTracker:
     """Thread-safe progress printer for the enrichment pipeline.
@@ -50,6 +79,7 @@ class _ProgressTracker:
         fetch_workers: int,
         enrich_workers: int,
         live_stream_path: str = "",
+        failed_stream_path: str = "",
     ) -> None:
         self._lock = threading.Lock()
         self._total = total
@@ -61,10 +91,15 @@ class _ProgressTracker:
         self._playwright = 0
         self._start = time.monotonic()
         self._stream_path = live_stream_path.strip()
-        # Truncate the live stream file at the start of each run so it only
-        # contains results from this session.
+        self._failed_path = failed_stream_path.strip()
+        # Truncate both stream files at the start of each run so they only
+        # contain results from this session.
         if self._stream_path:
+            Path(self._stream_path).parent.mkdir(parents=True, exist_ok=True)
             Path(self._stream_path).write_text("", encoding="utf-8")
+        if self._failed_path:
+            Path(self._failed_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(self._failed_path).write_text("", encoding="utf-8")
         self._print_header(fetch_workers, enrich_workers)
 
     def _print_header(self, fetch_workers: int, enrich_workers: int) -> None:
@@ -85,27 +120,40 @@ class _ProgressTracker:
         with self._lock:
             self._done += 1
             n = self._done
+            conf_reasoning_str = ""
 
             # Classify the outcome.
             raw = enriched.get("raw_listing") or {}
-            enrich_err = raw.get("enrichment_error", "") if isinstance(raw, dict) else ""
-            has_content = bool(enriched.get("keywords") or enriched.get("required_skills"))
+            enrich_err = (
+                raw.get("enrichment_error", "") if isinstance(raw, dict) else ""
+            )
+            has_content = bool(
+                enriched.get("keywords") or enriched.get("required_skills")
+            )
             fetch_method = page.get("_fetch_method", "http")
 
             if enrich_err:
                 self._failed += 1
                 if "page_fetch_error" in enrich_err or "playwright_error" in enrich_err:
-                    status_str = err(f"✗  page blocked  {dim('(' + enrich_err.split(':')[0] + ')')}")
+                    status_str = err(
+                        f"✗  page blocked  {dim('(' + enrich_err.split(':')[0] + ')')}"
+                    )
                 else:
-                    status_str = err(f"✗  llm failed    {dim('(' + enrich_err[:40] + ')')}")
+                    status_str = err(
+                        f"✗  llm failed    {dim('(' + enrich_err[:40] + ')')}"
+                    )
             elif has_content:
                 conf = enriched.get("confidence", "")
+                conf_reasoning = enriched.get("confidence_reasoning", "")
                 if conf == "high":
                     self._enriched += 1
                     status_str = ok("✓  enriched")
+                    conf_reasoning_str = f"  {conf_reasoning}"
                 else:
                     self._weak += 1
-                    status_str = warn(f"~  enriched  {dim('(conf=' + (conf or '?') + ')')}")
+                    status_str = warn(
+                        f"~  enriched  {dim('(conf=' + (conf or '?') + ')')}"
+                    )
             else:
                 self._weak += 1
                 status_str = warn("~  no content extracted")
@@ -113,6 +161,8 @@ class _ProgressTracker:
             if fetch_method == "playwright":
                 self._playwright += 1
                 method_tag = "  " + tag("[pw]")
+            elif fetch_method == "raw_description":
+                method_tag = "  " + tag("[raw]")
             else:
                 method_tag = ""
 
@@ -134,14 +184,19 @@ class _ProgressTracker:
             print(
                 f"  {counter(f'[{n:{self._width}}/{self._total}]')} "
                 f"{record_label:<56} "
-                f"{status_str}{method_tag}  {eta_str}",
+                f"{status_str}{method_tag}  {eta_str}  {conf_reasoning_str}",
                 flush=True,
             )
 
-            # Stream completed record to live file for real-time inspection.
-            if self._stream_path:
+            # Route to the appropriate stream file:
+            #   - Failed records (page fetch error / all models failed) → failed JSONL only.
+            #   - Successful / weak records → live stream only.
+            # This keeps the live stream clean and the failed file actionable.
+            record_is_failed = is_enrichment_failed(enriched)
+            target_path = self._failed_path if record_is_failed else self._stream_path
+            if target_path:
                 try:
-                    with open(self._stream_path, "a", encoding="utf-8") as sf:
+                    with open(target_path, "a", encoding="utf-8") as sf:
                         sf.write(json.dumps(enriched, ensure_ascii=False) + "\n")
                         sf.flush()
                 except Exception:
@@ -186,6 +241,7 @@ class _ProgressTracker:
 # Pipeline internals
 # ---------------------------------------------------------------------------
 
+
 def _fetch_stage(
     records: list[dict[str, Any]],
     targets: list[int],
@@ -198,28 +254,39 @@ def _fetch_stage(
     (idx, page) pairs onto work_queue as they complete.
     Sends n_enrich_workers sentinel poison-pills when done.
     """
-    with ThreadPoolExecutor(max_workers=cfg.fetch_workers, thread_name_prefix="fetcher") as pool:
+    with ThreadPoolExecutor(
+        max_workers=cfg.fetch_workers, thread_name_prefix="fetcher"
+    ) as pool:
         futures: dict[Future, int] = {
-            pool.submit(_safe_fetch, records[i], cfg): i
-            for i in targets
+            pool.submit(_safe_fetch, records[i], cfg): i for i in targets
         }
         for future in as_completed(futures):
             idx = futures[future]
             try:
                 page = future.result(timeout=cfg.fetch_timeout + 5)
             except FutureTimeoutError:
-                logger.debug("Fetch timed out for record %d (%s)", idx, records[idx].get("job_url"))
+                logger.debug(
+                    "Fetch timed out for record %d (%s)",
+                    idx,
+                    records[idx].get("job_url"),
+                )
                 page = {
                     "final_url": records[idx].get("job_url", ""),
-                    "page_title": "", "page_text": "", "jobposting_jsonld": [],
-                    "error": "fetch_timeout", "_fetch_method": "http",
+                    "page_title": "",
+                    "page_text": "",
+                    "jobposting_jsonld": [],
+                    "error": "fetch_timeout",
+                    "_fetch_method": "http",
                 }
             except Exception as exc:
                 logger.debug("Fetch raised for record %d: %s", idx, exc)
                 page = {
                     "final_url": records[idx].get("job_url", ""),
-                    "page_title": "", "page_text": "", "jobposting_jsonld": [],
-                    "error": str(exc), "_fetch_method": "http",
+                    "page_title": "",
+                    "page_text": "",
+                    "jobposting_jsonld": [],
+                    "error": str(exc),
+                    "_fetch_method": "http",
                 }
             work_queue.put((idx, page))
 
@@ -229,16 +296,40 @@ def _fetch_stage(
 
 
 def _safe_fetch(record: dict[str, Any], cfg: EnrichConfig) -> dict[str, Any]:
-    """Thin wrapper so fetch_job_page errors never kill a pool thread."""
-    from .enrichment_worker import fetch_job_page, _validate_url
+    """Thin wrapper so fetch_job_page errors never kill a pool thread.
+
+    If the record carries a ``raw_description`` field with pre-supplied job
+    description text, that text is used directly as the page body and the HTTP
+    fetch is skipped entirely.  This handles cases where the job URL points to
+    a generic careers-portal shell that the LLM cannot extract content from.
+    """
+    from .enrichment_worker import _validate_url, fetch_job_page
+    from .utils import clean_text
+
     url = (record.get("job_url") or "").strip()
+
+    # Prefer raw_description over fetching — avoids bot-blocked / empty pages.
+    raw_desc = (record.get("raw_description") or "").strip()
+    if raw_desc:
+        return {
+            "final_url": url or "",
+            "page_title": "",
+            "page_text": clean_text(raw_desc)[: cfg.page_text_limit],
+            "jobposting_jsonld": [],
+            "_fetch_method": "raw_description",
+        }
+
     try:
         url = _validate_url(url, cfg)
         return fetch_job_page(url, cfg)
     except Exception as exc:
         return {
-            "final_url": url, "page_title": "", "page_text": "",
-            "jobposting_jsonld": [], "error": str(exc), "_fetch_method": "http",
+            "final_url": url,
+            "page_title": "",
+            "page_text": "",
+            "jobposting_jsonld": [],
+            "error": str(exc),
+            "_fetch_method": "http",
         }
 
 
@@ -267,7 +358,10 @@ def _enrich_worker_loop(
         except Exception as exc:
             logger.error(
                 "Enrich raised for record %d (%s): %s",
-                idx, record.get("job_url"), exc, exc_info=True,
+                idx,
+                record.get("job_url"),
+                exc,
+                exc_info=True,
             )
             enriched = _attach_error(record, str(exc))
         finally:
@@ -282,6 +376,7 @@ def _enrich_worker_loop(
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def enrich_records(
     records: list[dict[str, Any]],
@@ -311,8 +406,12 @@ def enrich_records(
 
     out = list(records)
     targets = [
-        i for i, r in enumerate(out)
-        if (r.get("job_url") or "").strip()
+        i
+        for i, r in enumerate(out)
+        # A record is eligible if it has a URL *or* pre-supplied raw_description text.
+        if (
+            (r.get("job_url") or "").strip() or (r.get("raw_description") or "").strip()
+        )
         and (not r.get("keywords") or not r.get("required_skills"))
     ]
 
@@ -321,15 +420,21 @@ def enrich_records(
         skipped = len(targets) - len(capped)
         if skipped:
             print(
-                dim(f"  --enrich-limit {limit}: capping to {limit} records "
-                    f"({skipped} unenriched skipped for this run)."),
+                dim(
+                    f"  --enrich-limit {limit}: capping to {limit} records "
+                    f"({skipped} unenriched skipped for this run)."
+                ),
                 flush=True,
             )
         targets = capped
 
     already_done = len(records) - len(targets)
     if already_done:
-        label_str = "already-enriched or deferred by --enrich-limit" if limit is not None else "already-enriched"
+        label_str = (
+            "already-enriched or deferred by --enrich-limit"
+            if limit is not None
+            else "already-enriched"
+        )
         print(dim(f"  Skipping {already_done:,} {label_str} records."), flush=True)
 
     if not targets:
@@ -341,10 +446,18 @@ def enrich_records(
         cfg.fetch_workers,
         cfg.enrich_workers,
         live_stream_path=cfg.live_stream_path,
+        failed_stream_path=cfg.failed_stream_path,
     )
     if cfg.live_stream_path:
         print(
             dim(f"  Live stream → {cfg.live_stream_path}  (tail -f to follow)"),
+            flush=True,
+        )
+    if cfg.failed_stream_path:
+        print(
+            dim(
+                f"  Failed stream → {cfg.failed_stream_path}  (page-fetch / LLM failures)"
+            ),
             flush=True,
         )
 
@@ -382,7 +495,28 @@ def enrich_records(
     for t in enrich_threads:
         t.join(timeout=cfg.per_record_timeout)
         if t.is_alive():
-            print(warn(f"  ⚠  Enrich thread {t.name} did not finish in time."), file=sys.stderr, flush=True)
+            print(
+                warn(f"  ⚠  Enrich thread {t.name} did not finish in time."),
+                file=sys.stderr,
+                flush=True,
+            )
 
     tracker.summary()
-    return out
+
+    # Separate hard-failed records from the output so they are never written
+    # to the master JSONL / JSON files.  They have already been streamed to
+    # cfg.failed_stream_path by _ProgressTracker.report().
+    failed_records = [r for r in out if is_enrichment_failed(r)]
+    clean_out = [r for r in out if not is_enrichment_failed(r)]
+
+    if failed_records:
+        print(
+            warn(
+                f"  ⚠  {len(failed_records)} record(s) with hard enrichment failures "
+                f"excluded from master output."
+            )
+            + (dim(f"  → {cfg.failed_stream_path}") if cfg.failed_stream_path else ""),
+            flush=True,
+        )
+
+    return clean_out

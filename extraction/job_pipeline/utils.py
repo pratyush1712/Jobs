@@ -1,4 +1,5 @@
 """General utilities."""
+
 from __future__ import annotations
 
 import base64
@@ -8,7 +9,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, unquote, urlparse, urlunparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -95,7 +96,11 @@ def normalize_list(value: Any) -> list[str]:
 
 def parse_unix_epoch_to_iso(value: Any) -> str:
     try:
-        return datetime.fromtimestamp(float(value), timezone.utc).replace(microsecond=0).isoformat()
+        return (
+            datetime.fromtimestamp(float(value), timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+        )
     except Exception:
         return str(value or "")
 
@@ -113,7 +118,11 @@ def parse_date_loose(value: Any) -> datetime:
 
 
 def sort_records_newest_first(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(records, key=lambda r: parse_date_loose(r.get("date_posted_human")), reverse=True)
+    return sorted(
+        records,
+        key=lambda r: parse_date_loose(r.get("date_posted_human")),
+        reverse=True,
+    )
 
 
 def normalize_url_for_dedupe(url: str | None) -> str:
@@ -143,11 +152,14 @@ def normalize_url_for_dedupe(url: str | None) -> str:
 def composite_hash(company: str, title: str, first_location: str = "") -> str:
     def alnum(x: str) -> str:
         return re.sub(r"[^a-z0-9]", "", x.lower())
+
     payload = f"{alnum(company)}::{alnum(title)}::{alnum(first_location)}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def make_dedupe_key(job_url: str, company: str, title: str, locations: list[str] | None = None) -> str:
+def make_dedupe_key(
+    job_url: str, company: str, title: str, locations: list[str] | None = None
+) -> str:
     url_key = normalize_url_for_dedupe(job_url)
     if url_key:
         return url_key
@@ -156,7 +168,11 @@ def make_dedupe_key(job_url: str, company: str, title: str, locations: list[str]
 
 def build_gmail_link(message_id_header: str) -> str:
     msg_id = (message_id_header or "").strip().strip("<>").strip()
-    return f"https://mail.google.com/mail/#search/{quote(f'rfc822msgid:{msg_id}', safe=':@')}" if msg_id else ""
+    return (
+        f"https://mail.google.com/mail/#search/{quote(f'rfc822msgid:{msg_id}', safe=':@')}"
+        if msg_id
+        else ""
+    )
 
 
 def unwrap_possible_redirect_url(url: str) -> str:

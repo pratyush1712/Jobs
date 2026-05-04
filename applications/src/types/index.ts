@@ -204,10 +204,18 @@ export interface AppSettings {
 export interface JobFilters {
   query: string;
   statuses: ApplicationStatus[];
+  /** Pipeline source chips — "wttj_gmail" and/or "simplify_github". */
+  source: string[];
   remotePolicy: string[];
   employmentType: string[];
   seniority: string[];
   confidence: string[];
+  /**
+   * true  = only jobs that were successfully enriched (non-empty summary, no error)
+   * false = only jobs whose enrichment failed or that were never enriched
+   * null  = no filter (show all)
+   */
+  enriched: boolean | null;
   saved: boolean | null;
   archived: boolean | null;
 }
@@ -217,7 +225,8 @@ export type SortField =
   | "dateApplied"
   | "company"
   | "job_title"
-  | "email_date";
+  | "email_date"
+  | "confidence";
 
 export type SortDirection = "asc" | "desc";
 

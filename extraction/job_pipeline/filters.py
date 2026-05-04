@@ -1,4 +1,5 @@
 """Eligibility filters shared by extraction steps."""
+
 from __future__ import annotations
 
 import re
@@ -7,7 +8,9 @@ from typing import Any
 from .constants import INTERNSHIP_KEYWORD_PATTERNS
 from .utils import clean_space, html_to_text
 
-INTERNSHIP_RE = re.compile("|".join(f"(?:{p})" for p in INTERNSHIP_KEYWORD_PATTERNS), flags=re.I)
+INTERNSHIP_RE = re.compile(
+    "|".join(f"(?:{p})" for p in INTERNSHIP_KEYWORD_PATTERNS), flags=re.I
+)
 
 
 def is_internship_text(text: str) -> bool:

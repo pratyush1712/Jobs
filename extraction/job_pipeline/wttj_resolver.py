@@ -1,4 +1,5 @@
 """Browser resolver for real WTTJ Apply modal links."""
+
 from __future__ import annotations
 
 import json
@@ -9,6 +10,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
+
 from .constants import (
     APPLY_BUTTON_SELECTORS,
     ATS_OR_JOB_HINTS,
@@ -21,7 +23,13 @@ from .constants import (
     WTTJ_JOB_UNAVAILABLE_TEXT_FRAGMENTS,
     WTTJ_LOGGED_IN_SELECTORS,
 )
-from .utils import clean_space, write_json, is_wttj_job_detail_url, is_sendgrid_tracking_url, is_wttj_email_control_url
+from .utils import (
+    clean_space,
+    is_sendgrid_tracking_url,
+    is_wttj_email_control_url,
+    is_wttj_job_detail_url,
+    write_json,
+)
 
 try:
     from playwright.sync_api import Page, sync_playwright
@@ -85,7 +93,9 @@ def score_candidate(candidate: CandidateLink, company: str = "") -> int:
     score = 0
     if any(h in lower_url for h in ATS_OR_JOB_HINTS):
         score += 60
-    if "or apply on" in lower_context or ("apply on" in lower_context and "website" in lower_context):
+    if "or apply on" in lower_context or (
+        "apply on" in lower_context and "website" in lower_context
+    ):
         score += 100
     if "website" in lower_text or "website" in lower_context:
         score += 20
@@ -96,7 +106,9 @@ def score_candidate(candidate: CandidateLink, company: str = "") -> int:
     return score
 
 
-def extract_candidates_from_html(raw_html: str, company: str = "") -> list[CandidateLink]:
+def extract_candidates_from_html(
+    raw_html: str, company: str = ""
+) -> list[CandidateLink]:
     soup = BeautifulSoup(raw_html or "", "html.parser")
     out: list[CandidateLink] = []
     seen: set[str] = set()
@@ -137,10 +149,20 @@ def wait_for_login(page: Page, timeout_s: int = DEFAULT_LOGIN_WAIT_TIMEOUT_S) ->
     Each poll tick also reloads the page so that a login completed on the WTTJ
     login page (after a redirect) is reflected on the job page we care about.
 
+    Pass ``timeout_s=0`` to skip the wait entirely (used in headless mode where
+    there is no GUI to log in — availability checks still work without a session,
+    only the Apply click is affected).
+
     Returns True when login is detected, False when the timeout expires.
     """
     if is_logged_in(page):
         return True
+
+    # timeout_s=0 means "do not wait" — no prompt, just return immediately.
+    # This is the headless path: availability detection works without a session;
+    # we just won't be able to click Apply and extract the ATS URL.
+    if timeout_s <= 0:
+        return False
 
     original_url = page.url
     print(
@@ -166,7 +188,10 @@ def wait_for_login(page: Page, timeout_s: int = DEFAULT_LOGIN_WAIT_TIMEOUT_S) ->
             print("[WTTJ] Login detected — continuing.", flush=True)
             return True
 
-    print(f"[WTTJ] Login not detected within {timeout_s}s — proceeding anyway.", flush=True)
+    print(
+        f"[WTTJ] Login not detected within {timeout_s}s — proceeding anyway.",
+        flush=True,
+    )
     return False
 
 
@@ -195,7 +220,9 @@ def detect_job_unavailable(page: Page) -> bool:
             pass
     try:
         body_text = page.inner_text("body").lower()
-        if any(fragment in body_text for fragment in WTTJ_JOB_UNAVAILABLE_TEXT_FRAGMENTS):
+        if any(
+            fragment in body_text for fragment in WTTJ_JOB_UNAVAILABLE_TEXT_FRAGMENTS
+        ):
             return True
     except Exception:
         pass
@@ -277,7 +304,9 @@ class WTTJBrowserResolver:
         login_wait_s: int = DEFAULT_LOGIN_WAIT_TIMEOUT_S,
     ) -> None:
         if sync_playwright is None:
-            raise RuntimeError("Install Playwright: pip install playwright && python -m playwright install chromium")
+            raise RuntimeError(
+                "Install Playwright: pip install playwright && python -m playwright install chromium"
+            )
         self.user_data_dir = user_data_dir
         self.headless = headless
         self.pause_ms = pause_ms
@@ -288,7 +317,11 @@ class WTTJBrowserResolver:
 
     def __enter__(self) -> "WTTJBrowserResolver":
         self._pw = sync_playwright().start()
-        self._ctx = self._pw.chromium.launch_persistent_context(user_data_dir=self.user_data_dir, headless=self.headless, viewport={"width": 1440, "height": 1000})
+        self._ctx = self._pw.chromium.launch_persistent_context(
+            user_data_dir=self.user_data_dir,
+            headless=self.headless,
+            viewport={"width": 1440, "height": 1000},
+        )
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
@@ -297,7 +330,13 @@ class WTTJBrowserResolver:
         if self._pw:
             self._pw.stop()
 
-    def resolve(self, url: str, company: str = "", title: str = "", debug_prefix: str = "wttj_job") -> WTTJResolveResult:
+    def resolve(
+        self,
+        url: str,
+        company: str = "",
+        title: str = "",
+        debug_prefix: str = "wttj_job",
+    ) -> WTTJResolveResult:
         if not self._ctx:
             raise RuntimeError("Use WTTJBrowserResolver as a context manager")
         result = WTTJResolveResult(input_url=url, company=company, title=title)
@@ -325,7 +364,9 @@ class WTTJBrowserResolver:
 
             # SendGrid should land on a real WTTJ job page before we click Apply.
             # If it lands on settings/unsubscribe or some non-job page, stop here.
-            if is_wttj_email_control_url(page.url) or not is_wttj_job_detail_url(page.url):
+            if is_wttj_email_control_url(page.url) or not is_wttj_job_detail_url(
+                page.url
+            ):
                 png = debug_dir / f"{debug_prefix}_bad_landing.png"
                 html_path = debug_dir / f"{debug_prefix}_bad_landing.html"
                 try:
@@ -334,7 +375,9 @@ class WTTJBrowserResolver:
                     result.debug_screenshot_after = str(png)
                 except Exception:
                     pass
-                result.error = f"Navigation did not land on a WTTJ job page. Landed on: {page.url}"
+                result.error = (
+                    f"Navigation did not land on a WTTJ job page. Landed on: {page.url}"
+                )
                 return result
 
             # Gate: skip jobs that WTTJ has marked as no longer available.
@@ -397,7 +440,9 @@ class WTTJBrowserResolver:
         return result
 
 
-def save_resolver_results(results: list[WTTJResolveResult], output_json: str, output_jsonl: str) -> None:
+def save_resolver_results(
+    results: list[WTTJResolveResult], output_json: str, output_jsonl: str
+) -> None:
     rows = [asdict(r) for r in results]
     write_json(output_json, rows, pretty=True)
     with open(output_jsonl, "w", encoding="utf-8") as f:

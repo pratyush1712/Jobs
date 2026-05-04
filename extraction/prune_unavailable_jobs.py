@@ -21,6 +21,7 @@ Usage
     # Adjust pause between page load and availability check (ms):
     python prune_unavailable_jobs.py --pause-ms 3000
 """
+
 from __future__ import annotations
 
 import argparse
@@ -38,7 +39,11 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from job_pipeline.utils import is_sendgrid_tracking_url, is_wttj_job_detail_url, write_json
+from job_pipeline.utils import (
+    is_sendgrid_tracking_url,
+    is_wttj_job_detail_url,
+    write_json,
+)
 from job_pipeline.wttj_resolver import (
     WTTJBrowserResolver,
     detect_job_unavailable,
@@ -49,13 +54,14 @@ from job_pipeline.wttj_resolver import (
 # Defaults
 # ---------------------------------------------------------------------------
 _DEFAULT_MASTER_JSONL = _HERE / "data/jobs/master_jobs.jsonl"
-_DEFAULT_MASTER_JSON  = _HERE / "data/jobs/master_jobs.json"
-_DEFAULT_PAUSE_MS     = 4000
+_DEFAULT_MASTER_JSON = _HERE / "data/jobs/master_jobs.json"
+_DEFAULT_PAUSE_MS = 4000
 
 
 # ---------------------------------------------------------------------------
 # Env helpers
 # ---------------------------------------------------------------------------
+
 
 def _load_dotenv() -> None:
     """Load a .env file from the extraction directory, if present."""
@@ -75,6 +81,7 @@ def _load_dotenv() -> None:
 # ---------------------------------------------------------------------------
 # JSONL I/O
 # ---------------------------------------------------------------------------
+
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     """Return all valid JSON-object lines from *path*."""
@@ -107,6 +114,7 @@ def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
 # URL selection
 # ---------------------------------------------------------------------------
 
+
 def _best_wttj_url(record: dict[str, Any]) -> str:
     """Return the best URL to check for job availability.
 
@@ -120,7 +128,9 @@ def _best_wttj_url(record: dict[str, Any]) -> str:
     automatically, landing on the actual WTTJ job detail page.
     """
     dashboard = (record.get("wttj_dashboard_url") or "").strip()
-    if dashboard and (is_wttj_job_detail_url(dashboard) or is_sendgrid_tracking_url(dashboard)):
+    if dashboard and (
+        is_wttj_job_detail_url(dashboard) or is_sendgrid_tracking_url(dashboard)
+    ):
         return dashboard
 
     job_url = (record.get("job_url") or "").strip()
@@ -129,7 +139,9 @@ def _best_wttj_url(record: dict[str, Any]) -> str:
 
     raw = record.get("raw_listing") or {}
     raw_wttj = (raw.get("wttj_job_url") or "").strip() if isinstance(raw, dict) else ""
-    if raw_wttj and (is_wttj_job_detail_url(raw_wttj) or is_sendgrid_tracking_url(raw_wttj)):
+    if raw_wttj and (
+        is_wttj_job_detail_url(raw_wttj) or is_sendgrid_tracking_url(raw_wttj)
+    ):
         return raw_wttj
 
     return ""
@@ -138,6 +150,7 @@ def _best_wttj_url(record: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # Availability check
 # ---------------------------------------------------------------------------
+
 
 def check_unavailable(
     page: Any,
@@ -171,7 +184,7 @@ def check_unavailable(
         print(f"            ↳ redirected to: {final_url[:90]}")
 
     if not is_wttj_job_detail_url(final_url):
-        print(f"            [WARN] Final URL is not a WTTJ job page — keeping record.")
+        print("            [WARN] Final URL is not a WTTJ job page — keeping record.")
         return False, final_url
 
     # Two-stage check: Playwright selectors first, raw HTML fallback second.
@@ -191,6 +204,7 @@ def check_unavailable(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     _load_dotenv()
@@ -227,17 +241,21 @@ def main() -> None:
     args = parser.parse_args()
 
     jsonl_path = Path(args.master_jsonl)
-    json_path  = Path(args.master_json)
+    json_path = Path(args.master_json)
 
     all_records = _load_jsonl(jsonl_path)
     if not all_records:
         print(f"No records found in {jsonl_path}. Nothing to do.")
         return
 
-    wttj_records   = [r for r in all_records if r.get("source") == "wttj_gmail"]
-    other_records  = [r for r in all_records if r.get("source") != "wttj_gmail"]
+    wttj_records = [r for r in all_records if r.get("source") == "wttj_gmail"]
+    other_records = [r for r in all_records if r.get("source") != "wttj_gmail"]
 
-    checkable   = [(i, r, _best_wttj_url(r)) for i, r in enumerate(all_records) if r.get("source") == "wttj_gmail" and _best_wttj_url(r)]
+    checkable = [
+        (i, r, _best_wttj_url(r))
+        for i, r in enumerate(all_records)
+        if r.get("source") == "wttj_gmail" and _best_wttj_url(r)
+    ]
     uncheckable = [r for r in wttj_records if not _best_wttj_url(r)]
 
     print(f"Loaded {len(all_records)} records total.")
@@ -252,12 +270,14 @@ def main() -> None:
     # Map original index → (keep: bool, updated_record)
     verdict: dict[int, tuple[bool, dict[str, Any]]] = {}
 
-    with WTTJBrowserResolver(headless=args.headless, pause_ms=args.pause_ms) as resolver:
+    with WTTJBrowserResolver(
+        headless=args.headless, pause_ms=args.pause_ms
+    ) as resolver:
         page = resolver._ctx.new_page()  # type: ignore[union-attr]
         try:
             for position, (orig_idx, record, url) in enumerate(checkable, start=1):
                 company = record.get("company", "")
-                title   = record.get("job_title", "")
+                title = record.get("job_title", "")
                 print(
                     f"  [{position:>2}/{len(checkable)}] {company} — {title}\n"
                     f"            URL: {url[:80]}"
@@ -268,18 +288,27 @@ def main() -> None:
                 updated_record = dict(record)
 
                 # If the redirect landed on a cleaner WTTJ URL, persist it.
-                if resolved_url and resolved_url != url and is_wttj_job_detail_url(resolved_url):
+                if (
+                    resolved_url
+                    and resolved_url != url
+                    and is_wttj_job_detail_url(resolved_url)
+                ):
                     clean = resolved_url.split("?")[0]
-                    if clean != (updated_record.get("wttj_dashboard_url") or "").split("?")[0]:
+                    if (
+                        clean
+                        != (updated_record.get("wttj_dashboard_url") or "").split("?")[
+                            0
+                        ]
+                    ):
                         updated_record["wttj_dashboard_url"] = clean
                         print(f"            ↳ updated wttj_dashboard_url → {clean}")
 
                 if unavailable:
-                    print(f"            [REMOVE] Job no longer available.")
+                    print("            [REMOVE] Job no longer available.")
                     removed.append(record)
                     verdict[orig_idx] = (False, updated_record)
                 else:
-                    print(f"            [KEEP]")
+                    print("            [KEEP]")
                     verdict[orig_idx] = (True, updated_record)
         finally:
             page.close()
@@ -295,7 +324,7 @@ def main() -> None:
             # Non-WTTJ record or uncheckable WTTJ record — always keep as-is.
             final_records.append(record)
 
-    print(f"\n--- Summary ---")
+    print("\n--- Summary ---")
     print(f"  Records before : {len(all_records)}")
     print(f"  Removed        : {len(removed)}")
     print(f"  Records after  : {len(final_records)}")

@@ -1,11 +1,31 @@
 "use client";
 
 import { useRef } from "react";
-import { Search, X, SlidersHorizontal, Grid2X2, List } from "lucide-react";
+import {
+  Search,
+  X,
+  SlidersHorizontal,
+  Grid2X2,
+  List,
+  Mail,
+  GitBranch,
+  CheckCircle,
+  AlertCircle,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUIStore, hasActiveFilters, activeFilterCount } from "@/lib/store";
-import { ALL_STATUSES, STATUS_META } from "@/lib/constants";
+import {
+  ALL_STATUSES,
+  STATUS_META,
+  CONFIDENCE_LEVELS,
+  CONFIDENCE_META,
+} from "@/lib/constants";
 import type { ApplicationStatus, ViewMode } from "@/types";
+
+const SOURCE_OPTIONS = [
+  { value: "wttj_gmail", label: "Email", Icon: Mail },
+  { value: "simplify_github", label: "Simplify", Icon: GitBranch },
+] as const;
 
 interface FilterBarProps {
   totalCount: number;
@@ -28,6 +48,30 @@ export function FilterBar({ totalCount, filteredCount }: FilterBarProps) {
       );
     } else {
       setFilter("statuses", [...current, s]);
+    }
+  }
+
+  function toggleSource(s: string) {
+    const current = filters.source;
+    if (current.includes(s)) {
+      setFilter(
+        "source",
+        current.filter((x) => x !== s),
+      );
+    } else {
+      setFilter("source", [...current, s]);
+    }
+  }
+
+  function toggleConfidence(level: string) {
+    const current = filters.confidence;
+    if (current.includes(level)) {
+      setFilter(
+        "confidence",
+        current.filter((x) => x !== level),
+      );
+    } else {
+      setFilter("confidence", [...current, level]);
     }
   }
 
@@ -142,7 +186,7 @@ export function FilterBar({ totalCount, filteredCount }: FilterBarProps) {
           );
         })}
 
-        <span className="text-divider mx-1 text-text-tertiary">|</span>
+        <span className="mx-1 text-text-tertiary">|</span>
 
         <button
           onClick={() =>
@@ -173,6 +217,109 @@ export function FilterBar({ totalCount, filteredCount }: FilterBarProps) {
         >
           Active only
         </button>
+      </div>
+
+      {/* Source + Enrichment chips */}
+      <div className="flex items-center gap-2 px-5 pb-3 overflow-x-auto">
+        <span className="text-xs font-semibold text-text-tertiary shrink-0 mr-1 uppercase tracking-wider">
+          Source
+        </span>
+        {SOURCE_OPTIONS.map(({ value, label, Icon }) => {
+          const active = filters.source.includes(value);
+          return (
+            <button
+              key={value}
+              onClick={() => toggleSource(value)}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md shrink-0",
+                "text-xs font-semibold transition-colors",
+                active
+                  ? "bg-violet-muted text-violet ring-1 ring-inset ring-violet/30"
+                  : "bg-surface-3 text-text-tertiary hover:bg-surface-2 border border-divider",
+              )}
+            >
+              <Icon className="h-3 w-3" />
+              {label}
+            </button>
+          );
+        })}
+
+        <span className="mx-1 text-text-tertiary">|</span>
+
+        <span className="text-xs font-semibold text-text-tertiary shrink-0 mr-1 uppercase tracking-wider">
+          Enrichment
+        </span>
+
+        {/* Enriched chip */}
+        <button
+          onClick={() =>
+            setFilter("enriched", filters.enriched === true ? null : true)
+          }
+          className={cn(
+            "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md shrink-0",
+            "text-xs font-semibold transition-colors",
+            filters.enriched === true
+              ? "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-300"
+              : "bg-surface-3 text-text-tertiary hover:bg-surface-2 border border-divider",
+          )}
+        >
+          <CheckCircle className="h-3 w-3" />
+          Enriched
+        </button>
+
+        {/* Not Enriched / Failed chip */}
+        <button
+          onClick={() =>
+            setFilter("enriched", filters.enriched === false ? null : false)
+          }
+          className={cn(
+            "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md shrink-0",
+            "text-xs font-semibold transition-colors",
+            filters.enriched === false
+              ? "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-300"
+              : "bg-surface-3 text-text-tertiary hover:bg-surface-2 border border-divider",
+          )}
+        >
+          <AlertCircle className="h-3 w-3" />
+          Not Enriched
+        </button>
+
+        <span className="mx-1 text-text-tertiary">|</span>
+
+        <span className="text-xs font-semibold text-text-tertiary shrink-0 mr-1 uppercase tracking-wider">
+          Confidence
+        </span>
+
+        {/* High / Medium / Low confidence chips */}
+        {CONFIDENCE_LEVELS.map((level) => {
+          const meta = CONFIDENCE_META[level];
+          const active = filters.confidence.includes(level);
+          return (
+            <button
+              key={level}
+              onClick={() => toggleConfidence(level)}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md shrink-0",
+                "text-xs font-semibold transition-colors",
+                active
+                  ? cn(
+                      meta.bgColor,
+                      meta.color,
+                      "ring-1 ring-inset ring-current/30",
+                    )
+                  : "bg-surface-3 text-text-tertiary hover:bg-surface-2 border border-divider",
+              )}
+            >
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full",
+                  active ? meta.dotColor : "bg-text-tertiary",
+                )}
+              />
+              {meta.label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

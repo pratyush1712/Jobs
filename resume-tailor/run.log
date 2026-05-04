@@ -1,0 +1,35 @@
+2026-05-04 12:32:49,939 | INFO | Processing 5 job(s)...
+2026-05-04 12:32:49,940 | INFO | ─── [1/5] Ekimetrics — Junior Data Scientist & Marketing Effectiveness ───
+2026-05-04 12:32:49,940 | INFO | [_____________________________________________________________9d0068a2] Base resume: main.tex
+2026-05-04 12:32:49,940 | INFO | [_____________________________________________________________9d0068a2] Stage 1: Keyword extraction (reasoning=True)
+2026-05-04 12:32:51,367 | INFO | HTTP Request: POST https://pratyushsudhakar03-resource.openai.azure.com/openai/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-05-04 12:32:51,368 | ERROR | Non-retryable API error (status=400, model=gpt-5.4-1): Error code: 400 - {'error': {'message': "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}
+2026-05-04 12:32:51,369 | ERROR | ❌  Failed: 9d0068a2-fbc6-4fa9-8ef5-5a8a4d00a8da — Non-retryable API error 400: Error code: 400 - {'error': {'message': "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}
+2026-05-04 12:32:51,386 | INFO | ─── [2/5] Zego — Software Engineer ───
+2026-05-04 12:32:51,386 | INFO | [__________w______________df354b52] Base resume: main.tex
+2026-05-04 12:32:51,387 | INFO | [__________w______________df354b52] Stage 1: Keyword extraction (reasoning=True)
+2026-05-04 12:32:51,503 | INFO | HTTP Request: POST https://pratyushsudhakar03-resource.openai.azure.com/openai/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-05-04 12:32:51,504 | ERROR | Non-retryable API error (status=400, model=gpt-5.4-1): Error code: 400 - {'error': {'message': "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}
+2026-05-04 12:32:51,504 | ERROR | ❌  Failed: df354b52-875f-4be1-bbaf-d4bcbf9ed433 — Non-retryable API error 400: Error code: 400 - {'error': {'message': "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}
+2026-05-04 12:32:51,505 | INFO | ─── [3/5] HCSC — Associate Automation Programmer ───
+2026-05-04 12:32:51,505 | INFO | [_______________________________________7e65915f] Base resume: main.tex
+2026-05-04 12:32:51,505 | INFO | [_______________________________________7e65915f] Stage 1: Keyword extraction (reasoning=True)
+2026-05-04 12:32:51,594 | INFO | HTTP Request: POST https://pratyushsudhakar03-resource.openai.azure.com/openai/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-05-04 12:32:51,596 | ERROR | Non-retryable API error (status=400, model=gpt-5.4-1): Error code: 400 - {'error': {'message': "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}
+2026-05-04 12:32:51,596 | ERROR | ❌  Failed: 7e65915f-e56b-4e24-8bd7-1e5ad5d7c13b — Non-retryable API error 400: Error code: 400 - {'error': {'message': "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}
+2026-05-04 12:32:51,597 | INFO | ─── [4/5] Zego — Software Engineer ───
+2026-05-04 12:32:51,598 | INFO | [__________w______________dfa13b11] Base resume: main.tex
+2026-05-04 12:32:51,598 | INFO | [__________w______________dfa13b11] Stage 1: Keyword extraction (reasoning=True)
+2026-05-04 12:32:51,723 | INFO | HTTP Request: POST https://pratyushsudhakar03-resource.openai.azure.com/openai/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-05-04 12:32:51,723 | ERROR | Non-retryable API error (status=400, model=gpt-5.4-1): Error code: 400 - {'error': {'message': "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}
+2026-05-04 12:32:51,723 | ERROR | ❌  Failed: dfa13b11-87e1-44f0-893d-cd83bd3243ff — Non-retryable API error 400: Error code: 400 - {'error': {'message': "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}
+2026-05-04 12:32:51,724 | INFO | ─── [5/5] Vertiv — Associate Firmware Engineer ───
+2026-05-04 12:32:51,724 | INFO | [______________________w______________77e409ea] Base resume: main.tex
+2026-05-04 12:32:51,724 | INFO | [______________________w______________77e409ea] Stage 1: Keyword extraction (reasoning=True)
+2026-05-04 12:32:51,847 | INFO | HTTP Request: POST https://pratyushsudhakar03-resource.openai.azure.com/openai/v1/chat/completions "HTTP/1.1 400 Bad Request"
+2026-05-04 12:32:51,847 | ERROR | Non-retryable API error (status=400, model=gpt-5.4-1): Error code: 400 - {'error': {'message': "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}
+2026-05-04 12:32:51,847 | ERROR | ❌  Failed: 77e409ea-bc38-484d-ab05-0b0f92f92dd3 — Non-retryable API error 400: Error code: 400 - {'error': {'message': "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.", 'type': 'invalid_request_error', 'param': 'max_tokens', 'code': 'unsupported_parameter'}}
+2026-05-04 12:32:51,848 | INFO | ════════════════════════════════════════════════════════════
+2026-05-04 12:32:51,848 | INFO | Done. ✅ 0 succeeded | ❌ 5 failed
+2026-05-04 12:32:51,848 | INFO | Output directory: /Users/praty/Desktop/personal-tools/grad-plans/jobs-master/resume-tailor/output/resumes
+2026-05-04 12:32:51,849 | INFO | Summary written: /Users/praty/Desktop/personal-tools/grad-plans/jobs-master/resume-tailor/output/resumes/summary.json

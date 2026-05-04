@@ -4,6 +4,8 @@
  */
 
 import { create } from "zustand";
+import { getEnrichmentStatus } from "@/lib/utils";
+import { CONFIDENCE_META } from "@/lib/constants";
 import type {
   ApplicationStatus,
   JobFilters,
@@ -25,6 +27,9 @@ interface UIState {
   /* Import drawer */
   importOpen: boolean;
 
+  /* Sidebar */
+  sidebarCollapsed: boolean;
+
   /* Actions */
   setFilter: <K extends keyof JobFilters>(key: K, val: JobFilters[K]) => void;
   resetFilters: () => void;
@@ -36,15 +41,18 @@ interface UIState {
   selectAll: (ids: number[]) => void;
   setCommandOpen: (open: boolean) => void;
   setImportOpen: (open: boolean) => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
 }
 
 const DEFAULT_FILTERS: JobFilters = {
   query: "",
   statuses: [],
+  source: [],
   remotePolicy: [],
   employmentType: [],
   seniority: [],
   confidence: [],
+  enriched: null,
   saved: null,
   archived: null,
 };
@@ -57,6 +65,7 @@ export const useUIStore = create<UIState>((set) => ({
   selectedIds: new Set(),
   commandOpen: false,
   importOpen: false,
+  sidebarCollapsed: false,
 
   setFilter: (key, val) =>
     set((state) => ({
@@ -89,6 +98,8 @@ export const useUIStore = create<UIState>((set) => ({
   setCommandOpen: (open) => set({ commandOpen: open }),
 
   setImportOpen: (open) => set({ importOpen: open }),
+
+  setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
 }));
 
 /** Selector: returns true if any filters are active. */
@@ -96,10 +107,12 @@ export function hasActiveFilters(filters: JobFilters): boolean {
   return (
     filters.query.trim().length > 0 ||
     filters.statuses.length > 0 ||
+    filters.source.length > 0 ||
     filters.remotePolicy.length > 0 ||
     filters.employmentType.length > 0 ||
     filters.seniority.length > 0 ||
     filters.confidence.length > 0 ||
+    filters.enriched !== null ||
     filters.saved !== null ||
     filters.archived !== null
   );
@@ -110,10 +123,12 @@ export function activeFilterCount(filters: JobFilters): number {
   let count = 0;
   if (filters.query.trim().length > 0) count++;
   if (filters.statuses.length > 0) count++;
+  if (filters.source.length > 0) count++;
   if (filters.remotePolicy.length > 0) count++;
   if (filters.employmentType.length > 0) count++;
   if (filters.seniority.length > 0) count++;
   if (filters.confidence.length > 0) count++;
+  if (filters.enriched !== null) count++;
   if (filters.saved !== null) count++;
   if (filters.archived !== null) count++;
   return count;
@@ -129,10 +144,14 @@ export function applyFiltersAndSort<
     required_skills?: string[];
     preferred_skills?: string[];
     applicationStatus: ApplicationStatus;
+    source?: string;
     remote_policy?: string;
     employment_type?: string;
     seniority?: string;
     confidence?: string;
+    summary?: string;
+    raw?: Record<string, unknown>;
+    raw_listing?: Record<string, unknown>;
     saved: boolean;
     archived: boolean;
     importedAt: string;
@@ -165,6 +184,11 @@ export function applyFiltersAndSort<
     result = result.filter((job) =>
       filters.statuses.includes(job.applicationStatus),
     );
+  }
+
+  // Source filter
+  if (filters.source.length > 0) {
+    result = result.filter((job) => filters.source.includes(job.source ?? ""));
   }
 
   // Remote policy filter
@@ -200,6 +224,15 @@ export function applyFiltersAndSort<
     );
   }
 
+  // Enrichment filter
+  if (filters.enriched !== null) {
+    result = result.filter((job) => {
+      const status = getEnrichmentStatus(job);
+      const isEnriched = status === "enriched";
+      return filters.enriched ? isEnriched : !isEnriched;
+    });
+  }
+
   // Saved filter
   if (filters.saved !== null) {
     result = result.filter((job) => job.saved === filters.saved);
@@ -212,6 +245,15 @@ export function applyFiltersAndSort<
 
   // Sort
   result.sort((a, b) => {
+    // Confidence is sorted by a fixed priority order (high=0, medium=1, low=2)
+    // rather than lexicographically, so handle it separately.
+    if (sort.field === "confidence") {
+      const order = (c: string | undefined): number =>
+        CONFIDENCE_META[c as keyof typeof CONFIDENCE_META]?.sortOrder ?? 99;
+      const cmp = order(a.confidence) - order(b.confidence);
+      return sort.direction === "asc" ? cmp : -cmp;
+    }
+
     let aVal = "";
     let bVal = "";
 

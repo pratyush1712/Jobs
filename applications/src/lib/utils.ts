@@ -129,3 +129,49 @@ export function pluralize(
   if (count === 1) return `1 ${word}`;
   return `${count} ${plural ?? `${word}s`}`;
 }
+
+/**
+ * Phrases produced by the LLM (or the fetch layer) that signal the
+ * enrichment did not actually extract job content.
+ */
+const ENRICHMENT_FAILURE_PREFIXES = [
+  "the fetched page does not contain",
+  "the page does not contain",
+  "this page does not contain",
+  "no job",
+  "page_fetch_error",
+] as const;
+
+/**
+ * Returns the enrichment status of a job record:
+ * - "enriched" — summary exists and is not an error/failure message
+ * - "failed"   — enrichment ran but produced an error or a "no content" LLM response
+ * - "none"     — enrichment has not been run yet (empty summary, no error stored)
+ */
+export function getEnrichmentStatus(job: {
+  summary?: string;
+  confidence?: string;
+  raw?: Record<string, unknown>;
+  raw_listing?: Record<string, unknown>;
+}): "enriched" | "failed" | "none" {
+  const raw = (job.raw ?? job.raw_listing) as
+    | Record<string, unknown>
+    | undefined;
+  if (raw?.enrichment_error) return "failed";
+
+  const summary = (job.summary ?? "").trim().toLowerCase();
+
+  if (
+    summary &&
+    ENRICHMENT_FAILURE_PREFIXES.some((p) => summary.startsWith(p))
+  ) {
+    return "failed";
+  }
+
+  // "low" confidence with no summary means the LLM returned an empty extraction.
+  if (job.confidence === "low" && !summary) return "failed";
+
+  if (summary.length > 20) return "enriched";
+
+  return "none";
+}

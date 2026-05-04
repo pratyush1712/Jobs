@@ -9,6 +9,5 @@ or:
 
 from run_job_pipeline import main
 
-
 if __name__ == "__main__":
     main()

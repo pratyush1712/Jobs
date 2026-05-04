@@ -161,4 +161,39 @@ export const SORT_OPTIONS = [
   { value: "dateApplied", label: "Date Applied" },
   { value: "company", label: "Company" },
   { value: "job_title", label: "Job Title" },
+  { value: "confidence", label: "Confidence" },
 ] as const;
+
+/** Display metadata for each confidence level. */
+export const CONFIDENCE_META: Record<
+  "high" | "medium" | "low",
+  {
+    label: string;
+    color: string;
+    bgColor: string;
+    dotColor: string;
+    sortOrder: number;
+  }
+> = {
+  high: {
+    label: "High",
+    color: "text-emerald-700",
+    bgColor: "bg-emerald-50",
+    dotColor: "bg-emerald-500",
+    sortOrder: 0,
+  },
+  medium: {
+    label: "Medium",
+    color: "text-amber-700",
+    bgColor: "bg-amber-50",
+    dotColor: "bg-amber-400",
+    sortOrder: 1,
+  },
+  low: {
+    label: "Low",
+    color: "text-rose-700",
+    bgColor: "bg-rose-50",
+    dotColor: "bg-rose-400",
+    sortOrder: 2,
+  },
+};

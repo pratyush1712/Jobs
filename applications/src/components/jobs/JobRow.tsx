@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { cn, timeAgo, companyInitials } from "@/lib/utils";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { CONFIDENCE_META } from "@/lib/constants";
 import type { JobRecord } from "@/types";
 import { getDb } from "@/lib/db";
 
@@ -18,7 +19,16 @@ interface JobRowProps {
   job: JobRecord;
   isSelected?: boolean;
   isActive?: boolean;
+  /**
+   * Called whenever the row is clicked (before any navigation).
+   * Used in split view to update the selected job.
+   */
   onClick?: () => void;
+  /**
+   * When true, clicking the row will NOT navigate to `/jobs/:id`.
+   * Useful in split view where the row click should only select the job.
+   */
+  disableNavigation?: boolean;
 }
 
 /**
@@ -34,19 +44,28 @@ export const JobRow = memo(function JobRow({
   isSelected = false,
   isActive = false,
   onClick,
+  disableNavigation = false,
 }: JobRowProps) {
   const router = useRouter();
 
+  /**
+   * Shared activation handler for both mouse click and keyboard events.
+   * Calls onClick (e.g. selectJob) first, then navigates unless disabled.
+   */
+  const handleActivate = useCallback(() => {
+    onClick?.();
+    if (!disableNavigation) {
+      router.push(`/jobs/${job.id}`);
+    }
+  }, [job.id, onClick, router, disableNavigation]);
+
   const handleRowClick = useCallback(
     (e: React.MouseEvent) => {
-      onClick?.();
-
       const target = e.target as HTMLElement;
       if (target.closest("a") || target.closest("button")) return;
-
-      router.push(`/jobs/${job.id}`);
+      handleActivate();
     },
-    [job.id, onClick, router],
+    [handleActivate],
   );
 
   const toggleSaved = useCallback(
@@ -70,7 +89,7 @@ export const JobRow = memo(function JobRow({
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          handleRowClick(e as unknown as React.MouseEvent);
+          handleActivate();
         }
       }}
       className={cn(
@@ -112,6 +131,33 @@ export const JobRow = memo(function JobRow({
           {job.seniority}
         </span>
       )}
+
+      {/* Confidence badge — only shown when confidence is present */}
+      {job.confidence &&
+        job.confidence in CONFIDENCE_META &&
+        (() => {
+          const meta =
+            CONFIDENCE_META[job.confidence as keyof typeof CONFIDENCE_META];
+          return (
+            <span
+              className={cn(
+                "hidden md:flex items-center gap-1 shrink-0",
+                "text-xs font-semibold px-2 py-1 rounded-md",
+                meta.bgColor,
+                meta.color,
+              )}
+              title={`Enrichment confidence: ${meta.label}`}
+            >
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full shrink-0",
+                  meta.dotColor,
+                )}
+              />
+              {meta.label}
+            </span>
+          );
+        })()}
 
       {/* Status */}
       <StatusBadge status={job.applicationStatus} className="shrink-0" />
@@ -160,7 +206,10 @@ export const JobRow = memo(function JobRow({
         {timeAgo(job.email_date ?? job.importedAt)}
       </span>
 
-      <ArrowUpRight className="h-3.5 w-3.5 text-text-tertiary opacity-0 group-hover:opacity-50 transition-opacity shrink-0" />
+      {/* Navigate arrow — only shown when navigation is enabled */}
+      {!disableNavigation && (
+        <ArrowUpRight className="h-3.5 w-3.5 text-text-tertiary opacity-0 group-hover:opacity-50 transition-opacity shrink-0" />
+      )}
     </div>
   );
 });

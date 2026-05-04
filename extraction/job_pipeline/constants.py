@@ -5,25 +5,40 @@ from pathlib import Path
 PACKAGE_DIR = Path(__file__).resolve().parent
 EXTRACTION_DIR = PACKAGE_DIR.parent
 
+
 def extraction_path(*parts: str) -> str:
     """Return an absolute path anchored to the extraction project directory."""
     return str(EXTRACTION_DIR.joinpath(*parts))
+
 
 SIMPLIFY_LISTINGS_URL = "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json"
 SIMPLIFY_GITHUB_URL = "https://github.com/SimplifyJobs/New-Grad-Positions"
 
 GMAIL_QUERY = (
-    'from:(help@welcometothejungle.com OR welcome@welcometothejungle.com '
+    "from:(help@welcometothejungle.com OR welcome@welcometothejungle.com "
     'OR help@welcome-to-the-jungle.com) subject:"New match:"'
 )
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 CITIZENSHIP_KEYWORDS = [
-    "citizenship", "us citizen", "u.s. citizen", "usa citizen", "u.s. citizenship",
-    "citizenship required", "require u.s. citizenship", "must be a u.s. citizen",
-    "must be a us citizen", "us citizenship", "usa citizenship", "security clearance",
-    "clearance required", "active clearance", "top secret", "secret clearance",
-    "public trust", "eligible for security clearance",
+    "citizenship",
+    "us citizen",
+    "u.s. citizen",
+    "usa citizen",
+    "u.s. citizenship",
+    "citizenship required",
+    "require u.s. citizenship",
+    "must be a u.s. citizen",
+    "must be a us citizen",
+    "us citizenship",
+    "usa citizenship",
+    "security clearance",
+    "clearance required",
+    "active clearance",
+    "top secret",
+    "secret clearance",
+    "public trust",
+    "eligible for security clearance",
 ]
 
 # Defense contractors and companies whose roles universally require U.S. citizenship
@@ -51,8 +66,22 @@ BLOCKED_COMPANIES: list[str] = [
     "rtx",
     "palantir",
 ]
-ADVANCED_DEGREE_KEYWORDS = ["master", "phd", "ph.d", "mba", "doctorate", "advanced degree"]
-KEEP_CATEGORY_KEYWORDS = ["software", "engineer", "data", "machine learning", "quant", "product"]
+ADVANCED_DEGREE_KEYWORDS = [
+    "master",
+    "phd",
+    "ph.d",
+    "mba",
+    "doctorate",
+    "advanced degree",
+]
+KEEP_CATEGORY_KEYWORDS = [
+    "software",
+    "engineer",
+    "data",
+    "machine learning",
+    "quant",
+    "product",
+]
 
 # WTTJ-specific early skip. These are intentionally applied before URL parsing,
 # Playwright modal resolution, or OpenAI enrichment.
@@ -76,29 +105,73 @@ INTERNSHIP_KEYWORD_PATTERNS = [
 ]
 
 ATS_OR_JOB_HINTS = [
-    "greenhouse.io", "job-boards.greenhouse.io", "boards.greenhouse.io", "lever.co",
-    "jobs.lever.co", "ashbyhq.com", "jobs.ashbyhq.com", "workdayjobs.com",
-    "myworkdayjobs.com", "smartrecruiters.com", "icims.com", "oraclecloud.com",
-    "bamboohr.com", "recruitee.com", "rippling.com", "gusto.com", "personio.com",
-    "pinpointhq.com", "workable.com", "applytojob.com", "jobs.", "careers.",
-    "career.", "recruiting.",
+    "greenhouse.io",
+    "job-boards.greenhouse.io",
+    "boards.greenhouse.io",
+    "lever.co",
+    "jobs.lever.co",
+    "ashbyhq.com",
+    "jobs.ashbyhq.com",
+    "workdayjobs.com",
+    "myworkdayjobs.com",
+    "smartrecruiters.com",
+    "icims.com",
+    "oraclecloud.com",
+    "bamboohr.com",
+    "recruitee.com",
+    "rippling.com",
+    "gusto.com",
+    "personio.com",
+    "pinpointhq.com",
+    "workable.com",
+    "applytojob.com",
+    "jobs.",
+    "careers.",
+    "career.",
+    "recruiting.",
 ]
 BAD_URL_HINTS = [
-    "unsubscribe", "preferences", "privacy", "terms", "cookie", "instagram", "facebook",
-    "linkedin.com/company", "twitter.com", "x.com/", "/share", "cdn-cgi", "mailto:",
-    "tel:", "javascript:", "#", "settings/manage/candidate", "email.welcometothejungle.com/settings", "sendgrid.net", "ct.sendgrid.net", "/ls/click",
+    "unsubscribe",
+    "preferences",
+    "privacy",
+    "terms",
+    "cookie",
+    "instagram",
+    "facebook",
+    "linkedin.com/company",
+    "twitter.com",
+    "x.com/",
+    "/share",
+    "cdn-cgi",
+    "mailto:",
+    "tel:",
+    "javascript:",
+    "#",
+    "settings/manage/candidate",
+    "email.welcometothejungle.com/settings",
+    "sendgrid.net",
+    "ct.sendgrid.net",
+    "/ls/click",
 ]
 APPLY_BUTTON_SELECTORS = [
     # Stable data-testid selector — most reliable when present (unauthenticated / direct-link view)
     "[data-testid='apply-button']",
     # Text-based fallbacks
-    "button:has-text('Apply')", "a:has-text('Apply')", "[role='button']:has-text('Apply')",
-    "[data-testid*='apply']:has-text('Apply')", "[data-testid*='Apply']:has-text('Apply')",
-    "button:has-text('Postuler')", "a:has-text('Postuler')", "[role='button']:has-text('Postuler')",
+    "button:has-text('Apply')",
+    "a:has-text('Apply')",
+    "[role='button']:has-text('Apply')",
+    "[data-testid*='apply']:has-text('Apply')",
+    "[data-testid*='Apply']:has-text('Apply')",
+    "button:has-text('Postuler')",
+    "a:has-text('Postuler')",
+    "[role='button']:has-text('Postuler')",
 ]
 MODAL_OR_DRAWER_SELECTORS = [
-    "[role='dialog']", "[aria-modal='true']", "text=/Or apply on/i",
-    "text=/apply on .* website/i", "text=/Apply with your profile/i",
+    "[role='dialog']",
+    "[aria-modal='true']",
+    "text=/Or apply on/i",
+    "text=/apply on .* website/i",
+    "text=/Apply with your profile/i",
     "[data-testid='apply-via-otta-button']",
 ]
 
@@ -112,7 +185,12 @@ DEFAULT_WTTJ_EMAIL_DEBUG_DIR = extraction_path("artifacts", "debug", "wttj_email
 DEFAULT_WTTJ_PROFILE_DIR = extraction_path("runtime", "wttj_playwright_profile")
 DEFAULT_GMAIL_CREDENTIALS_FILE = extraction_path("secrets", "credentials.json")
 DEFAULT_GMAIL_TOKEN_FILE = extraction_path("secrets", "token.json")
-DEFAULT_ENRICHMENT_LIVE_STREAM = extraction_path("data", "jobs", "enrichment_live.jsonl")
+DEFAULT_ENRICHMENT_LIVE_STREAM = extraction_path(
+    "data", "jobs", "enrichment_live.jsonl"
+)
+DEFAULT_FAILED_ENRICHMENT_JSONL = extraction_path(
+    "data", "jobs", "enrichment_failed.jsonl"
+)
 
 # Selectors that are only present in the DOM when the user is logged in to WTTJ.
 # Confirmed from captured debug HTMLs: every authenticated job page contains

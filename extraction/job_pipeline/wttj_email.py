@@ -11,6 +11,7 @@ a job-card link just because a large ancestor block contains footer text like
 "Receive these notifications" or "Unsubscribe". Reject controls by URL and link
 text; accept SendGrid only when its nearby context looks like a job card.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,7 +22,11 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
-from .constants import DEFAULT_GMAIL_TOKEN_FILE, DEFAULT_WTTJ_EMAIL_DEBUG_DIR, GMAIL_QUERY
+from .constants import (
+    DEFAULT_GMAIL_TOKEN_FILE,
+    DEFAULT_WTTJ_EMAIL_DEBUG_DIR,
+    GMAIL_QUERY,
+)
 from .filters import is_internship_text
 from .gmail_client import get_gmail_service, list_all_message_ids, read_message
 from .models import coerce_master_record, empty_master_record
@@ -135,10 +140,27 @@ NOISE_LINES = {
 }
 
 _LOCATION_PATTERNS = [
-    "san francisco", "bay area", "new york", "seattle", "los angeles",
-    "chicago", "boston", "austin", "denver", "portland", "washington",
-    "atlanta", "miami", "remote", "hybrid", "within the", "united states",
-    "united kingdom", "canada", "+ 1 more", "+ 2 more",
+    "san francisco",
+    "bay area",
+    "new york",
+    "seattle",
+    "los angeles",
+    "chicago",
+    "boston",
+    "austin",
+    "denver",
+    "portland",
+    "washington",
+    "atlanta",
+    "miami",
+    "remote",
+    "hybrid",
+    "within the",
+    "united states",
+    "united kingdom",
+    "canada",
+    "+ 1 more",
+    "+ 2 more",
 ]
 
 
@@ -189,7 +211,9 @@ def is_generic_matches_link_text(text: str) -> bool:
     return lowered in GENERIC_MATCH_TEXTS
 
 
-def is_job_card_context(text: str, context: str, fallback_company: str = "", fallback_title: str = "") -> bool:
+def is_job_card_context(
+    text: str, context: str, fallback_company: str = "", fallback_title: str = ""
+) -> bool:
     """Return True if a link appears attached to a real job card.
 
     SendGrid links are accepted only after this check. Generic dashboard links and
@@ -218,7 +242,9 @@ def is_job_card_context(text: str, context: str, fallback_company: str = "", fal
     return role_signal and job_card_signal
 
 
-def extract_links_from_html(raw_html: str, fallback_company: str = "", fallback_title: str = "") -> list[dict[str, str]]:
+def extract_links_from_html(
+    raw_html: str, fallback_company: str = "", fallback_title: str = ""
+) -> list[dict[str, str]]:
     """Extract actionable WTTJ job-navigation links from email HTML.
 
     This keeps SendGrid click URLs only when they belong to a job-card context.
@@ -264,7 +290,9 @@ def extract_links_from_html(raw_html: str, fallback_company: str = "", fallback_
                 "raw_href": absolute_raw_href,
                 "text": text,
                 "context": context,
-                "is_sendgrid_tracking": str(is_sendgrid_tracking_url(navigation_href)).lower(),
+                "is_sendgrid_tracking": str(
+                    is_sendgrid_tracking_url(navigation_href)
+                ).lower(),
             }
         )
     return links
@@ -276,7 +304,9 @@ def _bad_url(url: str) -> bool:
     return not (is_wttj_job_detail_url(url) or is_sendgrid_tracking_url(url))
 
 
-def score_wttj_email_link(link: dict[str, str], company: str = "", title: str = "") -> int:
+def score_wttj_email_link(
+    link: dict[str, str], company: str = "", title: str = ""
+) -> int:
     href = (link.get("href") or "").lower()
     text = (link.get("text") or "").lower()
     context = (link.get("context") or "").lower()
@@ -295,14 +325,19 @@ def score_wttj_email_link(link: dict[str, str], company: str = "", title: str = 
         score += 15
     if title and title.lower() in context:
         score += 15
-    if any(word in text for word in ["see job", "view job", "apply", "see offer", "open role"]):
+    if any(
+        word in text
+        for word in ["see job", "view job", "apply", "see offer", "open role"]
+    ):
         score += 10
     if is_wttj_email_control_url(href):
         score -= 500
     return score
 
 
-def pick_wttj_job_detail_url(raw_html: str, company: str, title: str) -> tuple[str, list[dict[str, Any]]]:
+def pick_wttj_job_detail_url(
+    raw_html: str, company: str, title: str
+) -> tuple[str, list[dict[str, Any]]]:
     """Backward-compatible helper: returns only the best job URL."""
     candidates: list[dict[str, Any]] = []
     for link in extract_links_from_html(raw_html, company, title):
@@ -385,7 +420,9 @@ def _email_job_section_lines(email_text: str) -> list[str]:
         if lowered == "new job notification":
             in_jobs = False
             continue
-        if lowered.startswith("a new job matches your search preferences") or lowered.startswith("there are new jobs matching your search preferences"):
+        if lowered.startswith(
+            "a new job matches your search preferences"
+        ) or lowered.startswith("there are new jobs matching your search preferences"):
             in_jobs = True
             continue
         if not in_jobs:
@@ -426,9 +463,17 @@ def _parse_email_job_blocks(email_text: str) -> list[dict[str, str]]:
         title = lines[i + 2]
         i += 3
 
-        if _is_email_boilerplate_line(company) or _is_email_boilerplate_line(description) or _is_email_boilerplate_line(title):
+        if (
+            _is_email_boilerplate_line(company)
+            or _is_email_boilerplate_line(description)
+            or _is_email_boilerplate_line(title)
+        ):
             continue
-        if _is_salary_line(company) or _is_salary_line(description) or _is_salary_line(title):
+        if (
+            _is_salary_line(company)
+            or _is_salary_line(description)
+            or _is_salary_line(title)
+        ):
             continue
         if _looks_like_location(company) or _looks_like_location(description):
             continue
@@ -443,7 +488,13 @@ def _parse_email_job_blocks(email_text: str) -> list[dict[str, str]]:
         if i < len(lines) and _looks_like_location(lines[i]):
             i += 1
 
-        blocks.append({"company": clean_space(company), "description": clean_space(description), "title": clean_space(title)})
+        blocks.append(
+            {
+                "company": clean_space(company),
+                "description": clean_space(description),
+                "title": clean_space(title),
+            }
+        )
 
     return blocks
 
@@ -503,7 +554,9 @@ def _match_card_to_block(
     return best if best is not None and best_score >= 100 else None
 
 
-def infer_company_title_from_context(context: str, fallback_company: str = "", fallback_title: str = "") -> tuple[str, str]:
+def infer_company_title_from_context(
+    context: str, fallback_company: str = "", fallback_title: str = ""
+) -> tuple[str, str]:
     """Best-effort extraction from a WTTJ email job card.
 
     This intentionally only inspects the first/narrow ancestor section. Wider
@@ -513,8 +566,16 @@ def infer_company_title_from_context(context: str, fallback_company: str = "", f
     narrow = (context or "").split("---", 1)[0].strip()
     narrow_l = _compact_match_text(narrow)
 
-    company = fallback_company if fallback_company and _compact_match_text(fallback_company) in narrow_l else ""
-    title = fallback_title if fallback_title and _compact_match_text(fallback_title) in narrow_l else ""
+    company = (
+        fallback_company
+        if fallback_company and _compact_match_text(fallback_company) in narrow_l
+        else ""
+    )
+    title = (
+        fallback_title
+        if fallback_title and _compact_match_text(fallback_title) in narrow_l
+        else ""
+    )
     if company and title:
         return clean_space(company), clean_space(title)
 
@@ -524,14 +585,24 @@ def infer_company_title_from_context(context: str, fallback_company: str = "", f
         if len(lines) >= 4 and _is_level_line(lines[3]):
             parsed_title = f"{parsed_title} {lines[3]}"
         parsed_company = lines[0]
-        if not _looks_like_location(parsed_company) and not _is_salary_line(parsed_company):
-            return clean_space(company or parsed_company), clean_space(title or parsed_title)
+        if not _looks_like_location(parsed_company) and not _is_salary_line(
+            parsed_company
+        ):
+            return clean_space(company or parsed_company), clean_space(
+                title or parsed_title
+            )
 
     if not title:
         for line in lines:
             lowered = line.lower()
-            if any(hint in lowered for hint in ROLE_HINTS) and not _is_salary_line(line) and not _looks_like_location(line):
-                title = re.split(r"\s+Salary:\s+|\s+Location:\s+", line, maxsplit=1, flags=re.I)[0]
+            if (
+                any(hint in lowered for hint in ROLE_HINTS)
+                and not _is_salary_line(line)
+                and not _looks_like_location(line)
+            ):
+                title = re.split(
+                    r"\s+Salary:\s+|\s+Location:\s+", line, maxsplit=1, flags=re.I
+                )[0]
                 break
 
     if not company and lines:
@@ -539,14 +610,24 @@ def infer_company_title_from_context(context: str, fallback_company: str = "", f
         if not _looks_like_location(first) and not _is_salary_line(first):
             company = first
 
-    return clean_space(company or fallback_company), clean_space(title or fallback_title)
+    return clean_space(company or fallback_company), clean_space(
+        title or fallback_title
+    )
 
 
-def _write_debug_candidates(email_meta: dict[str, Any], candidates: list[dict[str, Any]], debug_dir: str = DEFAULT_WTTJ_EMAIL_DEBUG_DIR) -> None:
+def _write_debug_candidates(
+    email_meta: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    debug_dir: str = DEFAULT_WTTJ_EMAIL_DEBUG_DIR,
+) -> None:
     """Write candidate diagnostics when an email produces zero job matches."""
     try:
         Path(debug_dir).mkdir(parents=True, exist_ok=True)
-        raw_id = str(email_meta.get("gmail_internal_id") or email_meta.get("thread_id") or "email")
+        raw_id = str(
+            email_meta.get("gmail_internal_id")
+            or email_meta.get("thread_id")
+            or "email"
+        )
         safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", raw_id)[:100]
         path = Path(debug_dir) / f"{safe_id}_link_candidates.json"
         payload = {
@@ -556,7 +637,9 @@ def _write_debug_candidates(email_meta: dict[str, Any], candidates: list[dict[st
             "candidate_count": len(candidates),
             "candidates": candidates[:50],
         }
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     except Exception:
         pass
 
@@ -571,7 +654,9 @@ def extract_wttj_job_matches_from_email(
     context, and email_link_candidates. Internship matches are skipped here so
     the caller does not parse links, open pages, or enrich them.
     """
-    subject_company, subject_title = parse_new_match_subject(email_meta.get("subject", ""))
+    subject_company, subject_title = parse_new_match_subject(
+        email_meta.get("subject", "")
+    )
     bodies = email_meta.get("bodies", {}) or {}
     raw_html = "\n".join(bodies.get("text/html", []) or [])
     email_text = email_body_text(email_meta)
@@ -606,7 +691,9 @@ def extract_wttj_job_matches_from_email(
             company = block["company"]
             title = block["title"]
         else:
-            company, title = infer_company_title_from_context(context, subject_company, subject_title)
+            company, title = infer_company_title_from_context(
+                context, subject_company, subject_title
+            )
 
         internship_scan_text = "\n".join([title, company, context, link_text])
         if skip_internships and is_internship_text(internship_scan_text):
@@ -641,7 +728,9 @@ def wttj_email_to_master_record(
     match_context: str = "",
     email_text: str = "",
 ) -> dict[str, Any]:
-    fallback_company, fallback_title = parse_new_match_subject(email_meta.get("subject", ""))
+    fallback_company, fallback_title = parse_new_match_subject(
+        email_meta.get("subject", "")
+    )
     company = clean_space(company or fallback_company)
     title = clean_space(title or fallback_title)
     email_text = clean_text(email_text or email_body_text(email_meta))
@@ -673,7 +762,9 @@ def wttj_email_to_master_record(
             },
         }
     )
-    record["dedupe_key"] = make_dedupe_key(resolved_job_url or wttj_job_url, company, title, [])
+    record["dedupe_key"] = make_dedupe_key(
+        resolved_job_url or wttj_job_url, company, title, []
+    )
     return coerce_master_record(record)
 
 
@@ -688,7 +779,9 @@ def fetch_wttj_email_records(
     one email can contain multiple job cards. Filtering happens per extracted job
     match in extract_wttj_job_matches_from_email().
     """
-    service = get_gmail_service(credentials_file=credentials_file, token_file=token_file)
+    service = get_gmail_service(
+        credentials_file=credentials_file, token_file=token_file
+    )
     message_ids = list_all_message_ids(service, GMAIL_QUERY, limit=limit)
     records: list[dict[str, Any]] = []
     stats = {"emails_fetched": 0}

@@ -8,10 +8,12 @@ Usage example:
         --title "Junior Software Engineer" \\
         --keep-open
 """
+
 from __future__ import annotations
 
 import argparse
 import time
+
 from job_pipeline.constants import (
     DEFAULT_LOGIN_WAIT_TIMEOUT_S,
     DEFAULT_WTTJ_DEBUG_DIR,
@@ -40,14 +42,26 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_LOGIN_WAIT_TIMEOUT_S,
         help="Seconds to wait for you to log in if not already authenticated",
     )
-    p.add_argument("--user-data-dir", default=DEFAULT_WTTJ_PROFILE_DIR,
-                   help="Playwright persistent profile directory (preserves login session)")
-    p.add_argument("--debug-dir", default=DEFAULT_WTTJ_DEBUG_DIR,
-                   help="Directory where screenshot and HTML debug files are written")
-    p.add_argument("--headless", action="store_true",
-                   help="Run browser in headless mode (login impossible in this mode)")
-    p.add_argument("--keep-open", action="store_true",
-                   help="Keep the browser open after resolving (useful to inspect the modal)")
+    p.add_argument(
+        "--user-data-dir",
+        default=DEFAULT_WTTJ_PROFILE_DIR,
+        help="Playwright persistent profile directory (preserves login session)",
+    )
+    p.add_argument(
+        "--debug-dir",
+        default=DEFAULT_WTTJ_DEBUG_DIR,
+        help="Directory where screenshot and HTML debug files are written",
+    )
+    p.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run browser in headless mode (login impossible in this mode)",
+    )
+    p.add_argument(
+        "--keep-open",
+        action="store_true",
+        help="Keep the browser open after resolving (useful to inspect the modal)",
+    )
     return p.parse_args()
 
 
@@ -57,9 +71,15 @@ def print_result(result: WTTJResolveResult) -> None:
     print(sep)
     print(f"  input_url            : {result.input_url}")
     print(f"  job_unavailable      : {result.job_unavailable}")
-    print(f"  page_url_before_click: {result.page_url_before_click or '(not navigated)'}")
-    print(f"  page_url_after_click : {result.page_url_after_click or '(not navigated)'}")
-    print(f"  clicked_selector     : {result.clicked_selector or '(none — Apply not triggered)'}")
+    print(
+        f"  page_url_before_click: {result.page_url_before_click or '(not navigated)'}"
+    )
+    print(
+        f"  page_url_after_click : {result.page_url_after_click or '(not navigated)'}"
+    )
+    print(
+        f"  clicked_selector     : {result.clicked_selector or '(none — Apply not triggered)'}"
+    )
     print(f"  modal_detected       : {result.modal_detected}")
     print(f"  selected_url         : {result.selected_url or '(none)'}")
     if result.debug_screenshot_after:
@@ -75,9 +95,13 @@ def print_result(result: WTTJResolveResult) -> None:
     elif result.modal_detected:
         print("[WARN] Modal opened but no external ATS URL was found inside it.")
     elif result.clicked_selector:
-        print("[WARN] Apply was triggered but modal did not appear — the page may have navigated instead.")
+        print(
+            "[WARN] Apply was triggered but modal did not appear — the page may have navigated instead."
+        )
     else:
-        print("[FAIL] Apply could not be triggered (no button found and keyboard shortcut did not open a modal).")
+        print(
+            "[FAIL] Apply could not be triggered (no button found and keyboard shortcut did not open a modal)."
+        )
 
     if result.candidates:
         top = result.candidates[:5]

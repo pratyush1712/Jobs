@@ -2,9 +2,8 @@
 Enrichment worker: schema, page fetching, LLM calls, retry logic.
 Stateless — safe to instantiate once per thread in the enrich pool.
 """
-from __future__ import annotations
 
-from .constants import DEFAULT_ENRICHMENT_LIVE_STREAM
+from __future__ import annotations
 
 import json
 import logging
@@ -15,7 +14,13 @@ from typing import Any
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
-from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI, RateLimitError
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    OpenAI,
+    RateLimitError,
+)
 from pydantic import BaseModel, Field, ValidationError
 from tenacity import (
     before_sleep_log,
@@ -25,6 +30,7 @@ from tenacity import (
     wait_exponential_jitter,
 )
 
+from .constants import DEFAULT_ENRICHMENT_LIVE_STREAM, DEFAULT_FAILED_ENRICHMENT_JSONL
 from .http_client import make_session
 from .models import merge_enrichment_fields
 from .utils import clean_text
@@ -42,23 +48,24 @@ AZURE_VARS = [
 # Config
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class EnrichConfig:
     # Pipeline concurrency
-    fetch_workers: int  = int(os.getenv("ENRICH_FETCH_WORKERS",  "8"))
-    enrich_workers: int = int(os.getenv("ENRICH_LLM_WORKERS",    "4"))
+    fetch_workers: int = int(os.getenv("ENRICH_FETCH_WORKERS", "8"))
+    enrich_workers: int = int(os.getenv("ENRICH_LLM_WORKERS", "4"))
     queue_max_size: int = int(os.getenv("ENRICH_QUEUE_MAX_SIZE", "20"))
 
     # Timeouts
     per_record_timeout: float = float(os.getenv("ENRICH_RECORD_TIMEOUT_S", "120"))
-    fetch_timeout:      float = float(os.getenv("ENRICH_FETCH_TIMEOUT_S",   "30"))
+    fetch_timeout: float = float(os.getenv("ENRICH_FETCH_TIMEOUT_S", "30"))
 
     # Prompt / page limits
-    page_text_limit:   int = int(os.getenv("ENRICH_PAGE_TEXT_LIMIT",   "30000"))
+    page_text_limit: int = int(os.getenv("ENRICH_PAGE_TEXT_LIMIT", "30000"))
     prompt_page_limit: int = int(os.getenv("ENRICH_PROMPT_PAGE_LIMIT", "24000"))
 
     # LLM
-    llm_max_retries: int   = int(os.getenv("ENRICH_LLM_MAX_RETRIES", "4"))
+    llm_max_retries: int = int(os.getenv("ENRICH_LLM_MAX_RETRIES", "4"))
     llm_temperature: float = 0.0
 
     allowed_schemes: frozenset[str] = field(
@@ -68,13 +75,28 @@ class EnrichConfig:
     # Playwright fallback: when the plain HTTP fetch returns fewer than this
     # many characters of page text, re-fetch with a headless browser so that
     # JS-rendered ATS pages (Workday, Oracle, etc.) actually load.
-    playwright_fallback: bool = os.getenv("ENRICH_PLAYWRIGHT_FALLBACK", "true").lower() not in ("0", "false", "no")
-    playwright_thin_threshold: int = int(os.getenv("ENRICH_PLAYWRIGHT_THIN_THRESHOLD", "200"))
+    playwright_fallback: bool = os.getenv(
+        "ENRICH_PLAYWRIGHT_FALLBACK", "true"
+    ).lower() not in ("0", "false", "no")
+    playwright_thin_threshold: int = int(
+        os.getenv("ENRICH_PLAYWRIGHT_THIN_THRESHOLD", "200")
+    )
     playwright_timeout_ms: int = int(os.getenv("ENRICH_PLAYWRIGHT_TIMEOUT_MS", "30000"))
 
     # Live streaming: path to a JSONL file that is appended after each record
-    # completes enrichment. Empty string disables streaming.
-    live_stream_path: str = os.getenv("ENRICH_LIVE_STREAM_PATH", DEFAULT_ENRICHMENT_LIVE_STREAM)
+    # completes enrichment successfully. Empty string disables streaming.
+    live_stream_path: str = os.getenv(
+        "ENRICH_LIVE_STREAM_PATH", DEFAULT_ENRICHMENT_LIVE_STREAM
+    )
+
+    # Failed enrichments: path to a JSONL file that receives records where
+    # the page fetch failed or the LLM could not extract meaningful content
+    # (page_fetch_error, all_models_failed, etc.). These records are excluded
+    # from the live stream and from the master output files.
+    # Empty string disables writing failures to a separate file.
+    failed_stream_path: str = os.getenv(
+        "ENRICH_FAILED_STREAM_PATH", DEFAULT_FAILED_ENRICHMENT_JSONL
+    )
 
 
 _DEFAULT_CFG = EnrichConfig()
@@ -83,84 +105,179 @@ _DEFAULT_CFG = EnrichConfig()
 # Schema
 # ---------------------------------------------------------------------------
 
+
 class JobEnrichment(BaseModel):
-    summary:               str       = Field(default="", description=(
-        "2–4 sentence plain-English summary of the role — what the team does, "
-        "what the engineer will own, and the key technical focus areas."
-    ))
-    tech_stack:            list[str] = Field(default_factory=list, description=(
-        "Named technologies only: languages, frameworks, libraries, databases, cloud services, "
-        "and tools explicitly mentioned in the posting. Each item must be a specific named "
-        "product or technology (e.g. 'Python', 'React', 'PostgreSQL', 'AWS Lambda', 'Kubernetes', "
-        "'GraphQL'). Never include soft skills, adjectives, or generic descriptions here. "
-        "Max 3 words per item. Aim for 5–15 items."
-    ))
-    resume_keywords:       list[str] = Field(default_factory=list, description=(
-        "6–10 exact phrases from the job description that a recruiter or ATS would search for. "
-        "These should be domain terms, role-specific jargon, or methodology names that a "
-        "candidate should mirror verbatim in their resume and cover letter "
-        "(e.g. 'distributed systems', 'REST API design', 'CI/CD pipelines', "
-        "'cross-functional collaboration', 'data pipeline', 'production on-call'). "
-        "Do not duplicate items already in tech_stack. Focus on concepts, not tools."
-    ))
-    keywords:              list[str] = Field(default_factory=list, description=(
-        "3–6 role/domain category tags for filtering (e.g. 'Backend Engineering', "
-        "'Machine Learning', 'DevOps', 'Mobile Development', 'Data Engineering', "
-        "'Platform / Infrastructure'). Broader than tech_stack — used for grouping roles."
-    ))
-    required_skills:       list[str] = Field(default_factory=list, description=(
-        "Concrete, resume-listable skills that are explicitly required. "
-        "Each item must be short (≤6 words) and suitable as a resume bullet qualifier — "
-        "e.g. 'distributed systems design', 'SQL query optimization', 'REST API development', "
-        "'Agile sprint planning', 'code review', 'on-call incident response'. "
-        "Do NOT copy full sentences from the posting. Do NOT include years-of-experience "
-        "statements or degree requirements (those go in `requirements`)."
-    ))
-    preferred_skills:      list[str] = Field(default_factory=list, description=(
-        "Same format as required_skills but for explicitly preferred/nice-to-have skills. "
-        "Short, ≤6 words each."
-    ))
-    responsibilities:      list[str] = Field(default_factory=list, description=(
-        "What the person in this role will actually do day-to-day, paraphrased concisely. "
-        "Each item should start with an action verb. 5–10 items."
-    ))
-    requirements:          list[str] = Field(default_factory=list, description=(
-        "Eligibility requirements only: degree, years of experience, certifications, "
-        "authorization to work. These are gate-keeping criteria, not skills."
-    ))
-    nice_to_have:          list[str] = Field(default_factory=list, description=(
-        "Explicitly 'nice to have' or 'bonus' items not already captured in preferred_skills."
-    ))
-    compensation:          str       = Field(default="", description=(
-        "Salary range, equity, or total comp statement exactly as stated. Empty string if not mentioned."
-    ))
-    benefits:              str       = Field(default="")
-    relocation:            str       = Field(default="", description="'Provided', 'Not provided', or ''.")
-    visa_sponsorship_policy: str     = Field(default="", description="'Sponsored', 'Not sponsored', or ''.")
-    remote_policy:         str       = Field(default="", description="One of: 'Remote', 'Hybrid', 'On-site', or ''.")
-    employment_type:       str       = Field(default="", description="One of: 'Full-time', 'Part-time', 'Contract', 'Internship', or ''.")
-    seniority:             str       = Field(default="", description=(
-        "One of: 'Intern', 'Junior', 'Mid', 'Senior', 'Staff', 'Principal', 'Lead', "
-        "'Manager', 'Director', 'VP', 'C-level', or ''. "
-        "For 'new grad' or 'entry level' roles use 'Junior'."
-    ))
-    confidence:            str       = Field(default="low", description=(
-        "Quality of extraction. Use 'high' when tech_stack has ≥5 items AND required_skills "
-        "has ≥4 items AND responsibilities has ≥4 items. Use 'medium' when at least 2 of those "
-        "three conditions are met. Use 'low' when the page lacked real job content."
-    ))
+    summary: str = Field(
+        default="",
+        description=(
+            "2–4 sentence plain-English summary of the role — what the team does, "
+            "what the engineer will own, and the key technical focus areas."
+        ),
+    )
+    tech_stack: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Named technologies only: languages, frameworks, libraries, databases, cloud services, "
+            "and tools explicitly mentioned in the posting. Each item must be a specific named "
+            "product or technology (e.g. 'Python', 'React', 'PostgreSQL', 'AWS Lambda', 'Kubernetes', "
+            "'GraphQL'). Never include soft skills, adjectives, or generic descriptions here. "
+            "Max 3 words per item. Aim for 5–15 items."
+        ),
+    )
+    resume_keywords: list[str] = Field(
+        default_factory=list,
+        description=(
+            "6–10 exact phrases from the job description that a recruiter or ATS would search for. "
+            "These should be domain terms, role-specific jargon, or methodology names that a "
+            "candidate should mirror verbatim in their resume and cover letter "
+            "(e.g. 'distributed systems', 'REST API design', 'CI/CD pipelines', "
+            "'cross-functional collaboration', 'data pipeline', 'production on-call'). "
+            "Do not duplicate items already in tech_stack. Focus on concepts, not tools."
+        ),
+    )
+    keywords: list[str] = Field(
+        default_factory=list,
+        description=(
+            "3–6 role/domain category tags for filtering (e.g. 'Backend Engineering', "
+            "'Machine Learning', 'DevOps', 'Mobile Development', 'Data Engineering', "
+            "'Platform / Infrastructure'). Broader than tech_stack — used for grouping roles."
+        ),
+    )
+    required_skills: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Concrete, resume-listable skills that are explicitly required. "
+            "Each item must be short (≤6 words) and suitable as a resume bullet qualifier — "
+            "e.g. 'distributed systems design', 'SQL query optimization', 'REST API development', "
+            "'Agile sprint planning', 'code review', 'on-call incident response'. "
+            "Do NOT copy full sentences from the posting. Do NOT include years-of-experience "
+            "statements or degree requirements (those go in `requirements`)."
+        ),
+    )
+    preferred_skills: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Same format as required_skills but for explicitly preferred/nice-to-have skills. "
+            "Short, ≤6 words each."
+        ),
+    )
+    responsibilities: list[str] = Field(
+        default_factory=list,
+        description=(
+            "What the person in this role will actually do day-to-day, paraphrased concisely. "
+            "Each item should start with an action verb. 5–10 items."
+        ),
+    )
+    requirements: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Eligibility requirements only: degree, years of experience, certifications, "
+            "authorization to work. These are gate-keeping criteria, not skills."
+        ),
+    )
+    nice_to_have: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Explicitly 'nice to have' or 'bonus' items not already captured in preferred_skills."
+        ),
+    )
+    compensation: str = Field(
+        default="",
+        description=(
+            "Salary range, equity, or total comp statement exactly as stated. Empty string if not mentioned."
+        ),
+    )
+    benefits: str = Field(default="")
+    relocation: str = Field(
+        default="", description="'Provided', 'Not provided', or ''."
+    )
+    visa_sponsorship_policy: str = Field(
+        default="", description="'Sponsored', 'Not sponsored', or ''."
+    )
+    remote_policy: str = Field(
+        default="", description="One of: 'Remote', 'Hybrid', 'On-site', or ''."
+    )
+    employment_type: str = Field(
+        default="",
+        description="One of: 'Full-time', 'Part-time', 'Contract', 'Internship', or ''.",
+    )
+    seniority: str = Field(
+        default="",
+        description=(
+            "One of: 'Intern', 'Junior', 'Mid', 'Senior', 'Staff', 'Principal', 'Lead', "
+            "'Manager', 'Director', 'VP', 'C-level', or ''. "
+            "For 'new grad' or 'entry level' roles use 'Junior'."
+        ),
+    )
+    confidence: str = Field(
+        default="low",
+        description=(
+            "Quality of extraction. Use 'high' when tech_stack has ≥3 items AND required_skills "
+            "has ≥2 items AND responsibilities has ≥2 items. Use 'medium' when at least 2 of those "
+            "three conditions are met. Use 'low' when the page lacked real job content."
+        ),
+    )
+    confidence_reasoning: str = Field(
+        default="",
+        description=(
+            "Explain why you assigned the confidence level. High: \n"
+            "The page contains a clear job description with 3+ technologies, 2+ required skills, and 2+ responsibilities."
+            "Medium: \n"
+            "The page contains a clear job description with 3+ technologies, 2+ required skills, but less than 2 responsibilities."
+            "Low: \n"
+            "The page does not contain a clear job description."
+            "Other: \n"
+            "explain why you assigned the confidence level."
+        ),
+    )
 
     @property
     def is_weak(self) -> bool:
-        return self.confidence == "low" or not self.tech_stack or not self.required_skills
+        return (
+            self.confidence == "low" or not self.tech_stack or not self.required_skills
+        )
 
     @classmethod
     def empty(cls) -> "JobEnrichment":
         return cls()
 
+
+def _recompute_confidence(enrichment: "JobEnrichment") -> tuple[str, str]:
+    """Deterministically compute confidence and reasoning from the actual
+    extracted field counts, ignoring whatever the LLM self-reported.
+
+    Rules (must all use the *extracted* lists, not the page text):
+      high   — tech_stack ≥ 3  AND  required_skills ≥ 2  AND  responsibilities ≥ 2
+      medium — at least 2 of those 3 conditions are met
+      low    — fewer than 2 conditions met
+    """
+    has_tech = len(enrichment.tech_stack) >= 3
+    has_skills = len(enrichment.required_skills) >= 2
+    has_resp = len(enrichment.responsibilities) >= 2
+
+    conditions_met = sum([has_tech, has_skills, has_resp])
+
+    tech_count = len(enrichment.tech_stack)
+    skill_count = len(enrichment.required_skills)
+    resp_count = len(enrichment.responsibilities)
+
+    detail = (
+        f"tech_stack={tech_count} (need ≥3: {'✓' if has_tech else '✗'}), "
+        f"required_skills={skill_count} (need ≥2: {'✓' if has_skills else '✗'}), "
+        f"responsibilities={resp_count} (need ≥2: {'✓' if has_resp else '✗'})"
+    )
+
+    if conditions_met == 3:
+        return "high", f"All three conditions met — {detail}."
+    if conditions_met == 2:
+        return "medium", f"Two of three conditions met — {detail}."
+    return "low", f"Fewer than two conditions met — {detail}."
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def azure_configured() -> bool:
     return all(os.getenv(k) for k in AZURE_VARS)
@@ -172,6 +289,20 @@ def _attach_error(record: dict[str, Any], message: str) -> dict[str, Any]:
     if isinstance(out["raw_listing"], dict):
         out["raw_listing"]["enrichment_error"] = message
     return out
+
+
+def is_enrichment_failed(record: dict[str, Any]) -> bool:
+    """Return True when the record carries a hard enrichment failure marker.
+
+    A failure means the page could not be fetched at all, or all LLM models
+    returned nothing useful.  Records with a low-confidence result but at
+    least some extracted fields are NOT considered failures here — they are
+    weak enrichments and still go into the master output.
+    """
+    raw = record.get("raw_listing")
+    if not isinstance(raw, dict):
+        return False
+    return bool(raw.get("enrichment_error"))
 
 
 def _validate_url(url: str, cfg: EnrichConfig = _DEFAULT_CFG) -> str:
@@ -190,9 +321,11 @@ def _validate_url(url: str, cfg: EnrichConfig = _DEFAULT_CFG) -> str:
         raise ValueError(f"Blocked internal hostname {hostname!r}")
     return url
 
+
 # ---------------------------------------------------------------------------
 # Page fetching
 # ---------------------------------------------------------------------------
+
 
 def _extract_jsonld_jobs(soup: BeautifulSoup) -> list[dict]:
     results = []
@@ -204,7 +337,9 @@ def _extract_jsonld_jobs(soup: BeautifulSoup) -> list[dict]:
             data = json.loads(raw)
             entries = data if isinstance(data, list) else [data]
             for entry in entries:
-                if isinstance(entry, dict) and "JobPosting" in str(entry.get("@type", "")):
+                if isinstance(entry, dict) and "JobPosting" in str(
+                    entry.get("@type", "")
+                ):
                     results.append(entry)
         except json.JSONDecodeError as exc:
             logger.debug("Skipping malformed JSON-LD block: %s", exc)
@@ -216,9 +351,17 @@ def _parse_html(raw_html: str, base_url: str, cfg: EnrichConfig) -> dict[str, An
     try:
         soup = BeautifulSoup(raw_html, "html.parser")
     except Exception as exc:
-        return {"final_url": base_url, "page_title": "", "page_text": "", "jobposting_jsonld": [], "error": str(exc)}
+        return {
+            "final_url": base_url,
+            "page_title": "",
+            "page_text": "",
+            "jobposting_jsonld": [],
+            "error": str(exc),
+        }
 
-    page_title = clean_text(soup.title.string if soup.title and soup.title.string else "")
+    page_title = clean_text(
+        soup.title.string if soup.title and soup.title.string else ""
+    )
     jsonld_jobs = _extract_jsonld_jobs(soup)
 
     for tag in soup(["script", "style", "noscript", "svg"]):
@@ -246,7 +389,12 @@ def _fetch_with_playwright(url: str, cfg: EnrichConfig) -> dict[str, Any]:
     Returns the same dict shape as ``fetch_job_page`` so callers are agnostic
     to which method succeeded. Never raises — errors go in the 'error' key.
     """
-    base: dict[str, Any] = {"final_url": url, "page_title": "", "page_text": "", "jobposting_jsonld": []}
+    base: dict[str, Any] = {
+        "final_url": url,
+        "page_title": "",
+        "page_text": "",
+        "jobposting_jsonld": [],
+    }
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -263,7 +411,11 @@ def _fetch_with_playwright(url: str, cfg: EnrichConfig) -> dict[str, Any]:
                         "Chrome/124.0.0.0 Safari/537.36"
                     )
                 )
-                page.goto(url, wait_until="domcontentloaded", timeout=cfg.playwright_timeout_ms)
+                page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=cfg.playwright_timeout_ms,
+                )
                 try:
                     page.wait_for_load_state("networkidle", timeout=10_000)
                 except Exception:
@@ -277,7 +429,11 @@ def _fetch_with_playwright(url: str, cfg: EnrichConfig) -> dict[str, Any]:
         return result
     except Exception as exc:
         logger.debug("Playwright fetch failed for %s: %s", url, exc)
-        return {**base, "error": f"playwright_error: {exc}", "_fetch_method": "playwright"}
+        return {
+            **base,
+            "error": f"playwright_error: {exc}",
+            "_fetch_method": "playwright",
+        }
 
 
 def fetch_job_page(url: str, cfg: EnrichConfig = _DEFAULT_CFG) -> dict[str, Any]:
@@ -289,7 +445,10 @@ def fetch_job_page(url: str, cfg: EnrichConfig = _DEFAULT_CFG) -> dict[str, Any]
        JS-rendered ATS pages (Workday, Oracle, Ashby, etc.) actually load.
     """
     base: dict[str, Any] = {
-        "final_url": url, "page_title": "", "page_text": "", "jobposting_jsonld": []
+        "final_url": url,
+        "page_title": "",
+        "page_text": "",
+        "jobposting_jsonld": [],
     }
     session = make_session()
     try:
@@ -303,14 +462,21 @@ def fetch_job_page(url: str, cfg: EnrichConfig = _DEFAULT_CFG) -> dict[str, Any]
 
     content_type = (resp.headers.get("content-type") or "").lower()
     if "html" not in content_type:
-        return {**base, "final_url": str(resp.url), "page_text": resp.text[: cfg.page_text_limit], "_fetch_method": "http"}
+        return {
+            **base,
+            "final_url": str(resp.url),
+            "page_text": resp.text[: cfg.page_text_limit],
+            "_fetch_method": "http",
+        }
 
     result = _parse_html(resp.text, str(resp.url), cfg)
     result["_fetch_method"] = "http"
     page_text = result.get("page_text", "")
 
     if len(page_text) < cfg.playwright_thin_threshold:
-        logger.debug("Thin page (%d chars) for %s — trying Playwright.", len(page_text), url)
+        logger.debug(
+            "Thin page (%d chars) for %s — trying Playwright.", len(page_text), url
+        )
         if cfg.playwright_fallback:
             pw_result = _fetch_with_playwright(url, cfg)
             # Only use Playwright result if it actually has more content.
@@ -318,6 +484,7 @@ def fetch_job_page(url: str, cfg: EnrichConfig = _DEFAULT_CFG) -> dict[str, Any]
                 return pw_result
 
     return result
+
 
 # ---------------------------------------------------------------------------
 # Prompt
@@ -371,28 +538,44 @@ experience, certifications, work authorization. Not skills.
 **seniority** — Map "new grad", "entry level", "university hire" → "Junior".
 
 **confidence** — Follow the schema description exactly. "high" requires \
-tech_stack ≥5, required_skills ≥4, AND responsibilities ≥4. Otherwise \
+tech_stack ≥3, required_skills ≥2, AND responsibilities ≥2. Otherwise \
 "medium" (2 of 3 conditions met) or "low" (page lacked real job content).
+
+**confidence-reasoning** — Explain why you assigned the confidence level.
+High: The page contains a clear job description with 3+ technologies, 2+ required skills, and 2+ responsibilities.
+Medium: The page contains a clear job description with 3+ technologies, 2+ required skills, but less than 2 responsibilities.
+Low: The page does not contain a clear job description.
+Other: Explain why you assigned the confidence level.
+
 """
+
 
 def build_messages(
     record: dict[str, Any],
     page: dict[str, Any],
     cfg: EnrichConfig = _DEFAULT_CFG,
 ) -> list[dict[str, str]]:
-    ctx = {k: record.get(k) for k in ["company", "job_title", "location", "job_url", "source"]}
+    ctx = {
+        k: record.get(k)
+        for k in ["company", "job_title", "location", "job_url", "source"]
+    }
     payload = json.dumps(page, ensure_ascii=False)[: cfg.prompt_page_limit]
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
-        {"role": "user", "content": (
-            f"## Job Record\n{json.dumps(ctx, ensure_ascii=False, indent=2)}\n\n"
-            f"## Fetched Page\n{payload}"
-        )},
+        {
+            "role": "user",
+            "content": (
+                f"## Job Record\n{json.dumps(ctx, ensure_ascii=False, indent=2)}\n\n"
+                f"## Fetched Page\n{payload}"
+            ),
+        },
     ]
+
 
 # ---------------------------------------------------------------------------
 # LLM call with tenacity retry
 # ---------------------------------------------------------------------------
+
 
 def _is_retryable(exc: BaseException) -> bool:
     if isinstance(exc, (RateLimitError, APITimeoutError, APIConnectionError)):
@@ -404,7 +587,9 @@ def _is_retryable(exc: BaseException) -> bool:
 
 def _maybe_honor_retry_after(exc: BaseException) -> None:
     if isinstance(exc, RateLimitError) and exc.response is not None:
-        raw = exc.response.headers.get("Retry-After") or exc.response.headers.get("x-ratelimit-reset-requests")
+        raw = exc.response.headers.get("Retry-After") or exc.response.headers.get(
+            "x-ratelimit-reset-requests"
+        )
         if raw:
             try:
                 secs = float(raw)
@@ -442,7 +627,9 @@ def _call_model(
     @retry(
         # Only retry transient/server errors. 400 (bad request) and 404
         # (deployment not found) are non-retryable and must not loop.
-        retry=retry_if_exception_type((RateLimitError, APITimeoutError, APIConnectionError)),
+        retry=retry_if_exception_type(
+            (RateLimitError, APITimeoutError, APIConnectionError)
+        ),
         wait=wait_exponential_jitter(initial=2, max=60, jitter=5),
         stop=stop_after_attempt(cfg.llm_max_retries),
         before_sleep=before_sleep_log(logger, logging.WARNING),
@@ -470,11 +657,20 @@ def _call_model(
             # 5xx → retryable server error; 4xx → permanent failure, don't retry.
             if exc.status_code >= 500:
                 raise
-            logger.error("Non-retryable API error (status=%d) model=%s: %s", exc.status_code, model, exc)
+            logger.error(
+                "Non-retryable API error (status=%d) model=%s: %s",
+                exc.status_code,
+                model,
+                exc,
+            )
             # Raise a plain ValueError so tenacity does NOT retry this.
-            raise ValueError(f"Non-retryable API error {exc.status_code}: {exc}") from exc
+            raise ValueError(
+                f"Non-retryable API error {exc.status_code}: {exc}"
+            ) from exc
 
-        content = (resp.choices[0].message.content or "").strip() if resp.choices else ""
+        content = (
+            (resp.choices[0].message.content or "").strip() if resp.choices else ""
+        )
         if not content:
             finish = resp.choices[0].finish_reason if resp.choices else "unknown"
             raise ValueError(f"Empty model response (finish_reason={finish!r})")
@@ -487,9 +683,11 @@ def _call_model(
 
     return _attempt()
 
+
 # ---------------------------------------------------------------------------
 # EnrichWorker — one instance per enrich thread
 # ---------------------------------------------------------------------------
+
 
 class EnrichWorker:
     """
@@ -515,7 +713,7 @@ class EnrichWorker:
         return OpenAI(
             api_key=os.environ["AZURE_OPENAI_API_KEY"],
             base_url=os.environ["AZURE_OPENAI_BASE_URL"],
-            max_retries=0,   # tenacity owns retry logic
+            max_retries=0,  # tenacity owns retry logic
             timeout=60.0,
         )
 
@@ -529,8 +727,16 @@ class EnrichWorker:
         the merged record. Never raises — returns record with error attached.
         """
         # If page fetch produced nothing usable, bail early
-        if page.get("error") and not page.get("page_text") and not page.get("jobposting_jsonld"):
-            logger.warning("Skipping LLM for %s — page fetch failed: %s", record.get("job_url"), page["error"])
+        if (
+            page.get("error")
+            and not page.get("page_text")
+            and not page.get("jobposting_jsonld")
+        ):
+            logger.warning(
+                "Skipping LLM for %s — page fetch failed: %s",
+                record.get("job_url"),
+                page["error"],
+            )
             return _attach_error(record, f"page_fetch_error: {page['error']}")
 
         messages = build_messages(record, page, self.cfg)
@@ -539,7 +745,12 @@ class EnrichWorker:
         try:
             extracted = _call_model(self._client, self._fast, messages, self.cfg)
         except Exception as exc:
-            logger.warning("Fast model (%s) failed for %s: %s", self._fast, record.get("job_url"), exc)
+            logger.warning(
+                "Fast model (%s) failed for %s: %s",
+                self._fast,
+                record.get("job_url"),
+                exc,
+            )
 
         if (extracted is None or extracted.is_weak) and self._best != self._fast:
             logger.debug("Falling back to best model for %s", record.get("job_url"))
@@ -548,10 +759,21 @@ class EnrichWorker:
                 if extracted is None or not extracted2.is_weak:
                     extracted = extracted2
             except Exception as exc:
-                logger.warning("Best model (%s) failed for %s: %s", self._best, record.get("job_url"), exc)
+                logger.warning(
+                    "Best model (%s) failed for %s: %s",
+                    self._best,
+                    record.get("job_url"),
+                    exc,
+                )
 
         if extracted is None:
             return _attach_error(record, "all_models_failed")
+
+        # Recompute confidence deterministically from the actual extracted
+        # field counts — the LLM frequently mis-labels its own output.
+        recomputed_confidence, recomputed_reasoning = _recompute_confidence(extracted)
+        extracted.confidence = recomputed_confidence
+        extracted.confidence_reasoning = recomputed_reasoning
 
         enrichment = extracted.model_dump()
         if page.get("page_title"):
