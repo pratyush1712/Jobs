@@ -15,17 +15,14 @@ token.json
 runtime/
 .wttj-playwright-profile/
 
-# Generated data and debug artifacts
-data/
+# Generated data — ignore cache/temp, but track the two master job files
+# so the GitHub Actions enrichment workflow can commit results back.
+data/cache/
+data/jobs/enrichment_live.jsonl
+data/jobs/master_jobs_errors.jsonl
 artifacts/
 wttj_apply_debug/
 wttj_email_debug/
-master_jobs.json
-master_jobs.jsonl
-master_jobs_errors.jsonl
-simplify_listings_raw.json
-wttj_dashboard_links.json
-enrichment_live.jsonl
 
 # Root-level legacy log name
 enrichment.logs
